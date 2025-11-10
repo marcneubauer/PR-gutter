@@ -39,39 +39,84 @@ const vscode = __importStar(require("vscode"));
 const simple_git_1 = require("simple-git");
 const path = __importStar(require("path"));
 function activate(context) {
-    const gitDiffProvider = new GitDiffProvider(context);
-    // Register commands
-    const setTargetBranchCommand = vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
-        await gitDiffProvider.setTargetBranch();
-    });
-    const refreshDiffCommand = vscode.commands.registerCommand('pr-gutter.refreshDiff', async () => {
-        await gitDiffProvider.refreshDiff();
-    });
-    context.subscriptions.push(setTargetBranchCommand, refreshDiffCommand);
-    // Initialize the provider
-    gitDiffProvider.initialize();
+    console.log('PR Gutter: Extension activating...');
+    try {
+        const gitDiffProvider = new GitDiffProvider(context);
+        // Register commands
+        const setTargetBranchCommand = vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
+            console.log('PR Gutter: setTargetBranch command executed');
+            try {
+                await gitDiffProvider.setTargetBranch();
+            }
+            catch (error) {
+                console.error('PR Gutter: Error in setTargetBranch:', error);
+                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+            }
+        });
+        const refreshDiffCommand = vscode.commands.registerCommand('pr-gutter.refreshDiff', async () => {
+            console.log('PR Gutter: refreshDiff command executed');
+            try {
+                await gitDiffProvider.refreshDiff();
+            }
+            catch (error) {
+                console.error('PR Gutter: Error in refreshDiff:', error);
+                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+            }
+        });
+        const debugInfoCommand = vscode.commands.registerCommand('pr-gutter.showDebugInfo', async () => {
+            console.log('PR Gutter: showDebugInfo command executed');
+            try {
+                await gitDiffProvider.showDebugInfo();
+            }
+            catch (error) {
+                console.error('PR Gutter: Error in showDebugInfo:', error);
+                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+            }
+        });
+        context.subscriptions.push(setTargetBranchCommand, refreshDiffCommand, debugInfoCommand);
+        console.log('PR Gutter: Commands registered successfully');
+        // Initialize the provider
+        gitDiffProvider.initialize().catch(error => {
+            console.error('PR Gutter: Error initializing provider:', error);
+            vscode.window.showErrorMessage(`PR Gutter initialization failed: ${error}`);
+        });
+        console.log('PR Gutter: Extension activated successfully');
+        vscode.window.showInformationMessage('PR Gutter extension activated');
+    }
+    catch (error) {
+        console.error('PR Gutter: Error during activation:', error);
+        vscode.window.showErrorMessage(`PR Gutter activation failed: ${error}`);
+    }
 }
 function deactivate() { }
 class GitDiffProvider {
     constructor(context) {
         this.context = context;
         this.targetBranch = 'main';
-        // Create decoration types for different change types
-        this.decorationType = vscode.window.createTextEditorDecorationType({
-            backgroundColor: 'rgba(255, 165, 0, 0.2)', // Orange for modified
-            gutterIconPath: context.asAbsolutePath('resources/modified.svg'),
-            gutterIconSize: 'contain'
-        });
-        this.addedDecorationType = vscode.window.createTextEditorDecorationType({
-            backgroundColor: 'rgba(0, 255, 0, 0.1)', // Green for added
-            gutterIconPath: context.asAbsolutePath('resources/added.svg'),
-            gutterIconSize: 'contain'
-        });
-        this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
-            backgroundColor: 'rgba(255, 0, 0, 0.1)', // Red for deleted
-            gutterIconPath: context.asAbsolutePath('resources/deleted.svg'),
-            gutterIconSize: 'contain'
-        });
+        console.log('PR Gutter: GitDiffProvider constructor called');
+        try {
+            // Create decoration types for different change types
+            this.decorationType = vscode.window.createTextEditorDecorationType({
+                backgroundColor: 'rgba(255, 165, 0, 0.2)', // Orange for modified
+                gutterIconPath: context.asAbsolutePath('resources/modified.svg'),
+                gutterIconSize: 'contain'
+            });
+            this.addedDecorationType = vscode.window.createTextEditorDecorationType({
+                backgroundColor: 'rgba(0, 255, 0, 0.1)', // Green for added
+                gutterIconPath: context.asAbsolutePath('resources/added.svg'),
+                gutterIconSize: 'contain'
+            });
+            this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
+                backgroundColor: 'rgba(255, 0, 0, 0.1)', // Red for deleted
+                gutterIconPath: context.asAbsolutePath('resources/deleted.svg'),
+                gutterIconSize: 'contain'
+            });
+            console.log('PR Gutter: Decoration types created successfully');
+        }
+        catch (error) {
+            console.error('PR Gutter: Error in constructor:', error);
+            throw error;
+        }
     }
     async initialize() {
         // Get workspace root
@@ -123,6 +168,52 @@ class GitDiffProvider {
         }
         catch (error) {
             vscode.window.showErrorMessage(`Error getting branches: ${error}`);
+        }
+    }
+    async showDebugInfo() {
+        if (!this.git || !this.workspaceRoot) {
+            vscode.window.showErrorMessage('No git repository found');
+            return;
+        }
+        try {
+            const status = await this.git.status();
+            const branches = await this.git.branch();
+            const activeEditor = vscode.window.activeTextEditor;
+            let debugInfo = `**PR Gutter Debug Info**\n\n`;
+            debugInfo += `Current branch: ${status.current}\n`;
+            debugInfo += `Target branch: ${this.targetBranch}\n`;
+            debugInfo += `Available branches: ${branches.all.join(', ')}\n`;
+            debugInfo += `Workspace root: ${this.workspaceRoot}\n`;
+            if (activeEditor) {
+                const filePath = activeEditor.document.fileName;
+                const relativePath = path.relative(this.workspaceRoot, filePath);
+                debugInfo += `Active file: ${relativePath}\n`;
+                // Test diff command
+                try {
+                    const diffResult = await this.git.diff([`${this.targetBranch}...HEAD`, '--', relativePath]);
+                    debugInfo += `Diff result length: ${diffResult.length} chars\n`;
+                    if (diffResult.trim()) {
+                        debugInfo += `Diff preview:\n\`\`\`\n${diffResult.substring(0, 500)}\n\`\`\`\n`;
+                    }
+                    else {
+                        debugInfo += `No differences found between ${this.targetBranch} and HEAD for this file.\n`;
+                    }
+                }
+                catch (error) {
+                    debugInfo += `Diff error: ${error}\n`;
+                }
+            }
+            else {
+                debugInfo += `No active editor\n`;
+            }
+            // Show in output channel
+            const outputChannel = vscode.window.createOutputChannel('PR Gutter Debug');
+            outputChannel.clear();
+            outputChannel.append(debugInfo);
+            outputChannel.show();
+        }
+        catch (error) {
+            vscode.window.showErrorMessage(`Debug info error: ${error}`);
         }
     }
     async refreshDiff() {
@@ -181,21 +272,39 @@ class GitDiffProvider {
         try {
             // Try different diff strategies
             let diffResult = '';
+            let diffCommand = '';
             try {
                 // First try: compare with remote branch if it exists
-                diffResult = await this.git.diff([`origin/${this.targetBranch}...HEAD`, '--', relativePath]);
+                diffCommand = `origin/${this.targetBranch}...HEAD`;
+                diffResult = await this.git.diff([diffCommand, '--', relativePath]);
             }
             catch {
                 try {
                     // Second try: compare with local branch
-                    diffResult = await this.git.diff([`${this.targetBranch}...HEAD`, '--', relativePath]);
+                    diffCommand = `${this.targetBranch}...HEAD`;
+                    diffResult = await this.git.diff([diffCommand, '--', relativePath]);
                 }
                 catch {
-                    // Third try: compare with branch directly
-                    diffResult = await this.git.diff([this.targetBranch, 'HEAD', '--', relativePath]);
+                    try {
+                        // Third try: compare with branch directly
+                        diffCommand = `${this.targetBranch}..HEAD`;
+                        diffResult = await this.git.diff([diffCommand, '--', relativePath]);
+                    }
+                    catch {
+                        // Fourth try: simple diff
+                        diffCommand = `${this.targetBranch} HEAD`;
+                        diffResult = await this.git.diff([this.targetBranch, 'HEAD', '--', relativePath]);
+                    }
                 }
             }
+            // Debug output
+            console.log(`PR Gutter: Comparing ${diffCommand} for ${relativePath}`);
+            console.log(`PR Gutter: Diff result length: ${diffResult.length}`);
+            if (diffResult.trim()) {
+                console.log(`PR Gutter: Diff preview:`, diffResult.substring(0, 200));
+            }
             const changes = this.parseDiff(diffResult);
+            console.log(`PR Gutter: Found ${changes.length} changes`);
             // Apply decorations
             this.applyDecorations(activeEditor, changes);
         }
