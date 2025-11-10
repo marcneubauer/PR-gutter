@@ -1,0 +1,65 @@
+{
+  "name": "pr-gutter",
+  "displayName": "PR Gutter",
+  "description": "Shows git diff highlighting in the gutter between current branch and a configurable target branch",
+  "version": "0.0.1",
+  "publisher": "your-publisher-name",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/pr-gutter.git"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "pr-gutter.setTargetBranch",
+        "title": "Set Target Branch",
+        "category": "PR Gutter"
+      },
+      {
+        "command": "pr-gutter.refreshDiff",
+        "title": "Refresh Diff",
+        "category": "PR Gutter"
+      }
+    ],
+    "configuration": {
+      "title": "PR Gutter",
+      "properties": {
+        "pr-gutter.targetBranch": {
+          "type": "string",
+          "default": "main",
+          "description": "The target branch to compare against"
+        },
+        "pr-gutter.autoRefresh": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically refresh diff when files change"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.74.0",
+    "@types/node": "^24.10.0",
+    "typescript": "^5.9.3",
+    "@vscode/vsce": "^3.7.0"
+  },
+  "dependencies": {
+    "simple-git": "^3.30.0"
+  }
+}
