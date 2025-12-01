@@ -78,25 +78,22 @@ class GitDiffProvider {
         console.log('PR Gutter: GitDiffProvider constructor called');
         
         try {
-            // Create decoration types for different change types
+            // Create decoration types for different change types (no background, just emoji overlay)
             this.decorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(255, 165, 0, 0.2)', // Orange for modified
                 gutterIconPath: context.asAbsolutePath('resources/modified.svg'),
                 gutterIconSize: 'contain'
             });
-            
+
             this.addedDecorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(0, 255, 0, 0.1)', // Green for added
                 gutterIconPath: context.asAbsolutePath('resources/added.svg'),
                 gutterIconSize: 'contain'
             });
-            
+
             this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(255, 0, 0, 0.1)', // Red for deleted
                 gutterIconPath: context.asAbsolutePath('resources/deleted.svg'),
                 gutterIconSize: 'contain'
             });
-            
+
             console.log('PR Gutter: Decoration types created successfully');
         } catch (error) {
             console.error('PR Gutter: Error in constructor:', error);
