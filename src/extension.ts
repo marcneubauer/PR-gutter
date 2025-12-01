@@ -2,11 +2,15 @@ import * as vscode from 'vscode';
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as path from 'path';
 
+// Create output channel for logging
+const outputChannel = vscode.window.createOutputChannel('PR Gutter');
+
 export function activate(context: vscode.ExtensionContext) {
+    outputChannel.appendLine('PR Gutter: Extension activating...');
     console.log('PR Gutter: Extension activating...');
     
     try {
-        const gitDiffProvider = new GitDiffProvider(context);
+        const gitDiffProvider = new GitDiffProvider(context, outputChannel);
         
         // Register commands
         const setTargetBranchCommand = vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
@@ -49,6 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.showErrorMessage(`PR Gutter initialization failed: ${error}`);
         });
         
+        outputChannel.appendLine('PR Gutter: Extension activated successfully');
         console.log('PR Gutter: Extension activated successfully');
         vscode.window.showInformationMessage('PR Gutter extension activated');
         
@@ -74,29 +79,30 @@ class GitDiffProvider {
     private workspaceRoot: string | undefined;
     private targetBranch: string = 'main';
     
-    constructor(private context: vscode.ExtensionContext) {
+    constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
+        this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
         console.log('PR Gutter: GitDiffProvider constructor called');
         
         try {
             // Create decoration types for different change types
             this.decorationType = vscode.window.createTextEditorDecorationType({
                 backgroundColor: 'rgba(255, 165, 0, 0.2)', // Orange for modified
-                gutterIconPath: context.asAbsolutePath('resources/modified.svg'),
+                gutterIconPath: context.asAbsolutePath('resources/question.svg'), // Changed icon to question mark
                 gutterIconSize: 'contain'
             });
-            
+
             this.addedDecorationType = vscode.window.createTextEditorDecorationType({
                 backgroundColor: 'rgba(0, 255, 0, 0.1)', // Green for added
-                gutterIconPath: context.asAbsolutePath('resources/added.svg'),
+                gutterIconPath: context.asAbsolutePath('resources/lol.svg'), // Funny emoji for plus
                 gutterIconSize: 'contain'
             });
-            
+
             this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
                 backgroundColor: 'rgba(255, 0, 0, 0.1)', // Red for deleted
-                gutterIconPath: context.asAbsolutePath('resources/deleted.svg'),
+                gutterIconPath: context.asAbsolutePath('resources/bacon.svg'), // Bacon emoji for minus
                 gutterIconSize: 'contain'
             });
-            
+
             console.log('PR Gutter: Decoration types created successfully');
         } catch (error) {
             console.error('PR Gutter: Error in constructor:', error);
@@ -307,21 +313,24 @@ class GitDiffProvider {
     }
     
     private async updateDecorations() {
+        console.log('PR Gutter: updateDecorations called');
         const activeEditor = vscode.window.activeTextEditor;
         if (!activeEditor || !this.git || !this.workspaceRoot) {
+            console.log('PR Gutter: Missing dependencies - activeEditor:', !!activeEditor, 'git:', !!this.git, 'workspaceRoot:', !!this.workspaceRoot);
             return;
         }
-        
+
         const filePath = activeEditor.document.fileName;
+        console.log('PR Gutter: Current file path:', filePath);
         
         // Skip non-file schemes (like git:, output:, etc.)
         if (!filePath.startsWith(this.workspaceRoot)) {
+            console.log('PR Gutter: File not in workspace, skipping');
             return;
         }
-        
+
         const relativePath = path.relative(this.workspaceRoot, filePath);
-        
-        try {
+        console.log('PR Gutter: Relative path:', relativePath);        try {
             // Try different diff strategies
             let diffResult = '';
             let diffCommand = '';
@@ -354,14 +363,20 @@ class GitDiffProvider {
             if (diffResult.trim()) {
                 console.log(`PR Gutter: Diff preview:`, diffResult.substring(0, 200));
             }
-            
+
             const changes = this.parseDiff(diffResult);
-            console.log(`PR Gutter: Found ${changes.length} changes`);
+            this.outputChannel.appendLine(`PR Gutter1: Found ${changes.length} changes`);
+            this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
+            console.log(`PR Gutter2: Found ${changes.length} changes`);
             
+            this.outputChannel.appendLine('PR Gutter1: About to call applyDecorations');
+            console.log('PR Gutter2: About to call applyDecorations');
             // Apply decorations
             this.applyDecorations(activeEditor, changes);
-            
+            this.outputChannel.appendLine('PR Gutter1: applyDecorations returned');
+            console.log('PR Gutter2: applyDecorations returned');
         } catch (error) {
+            console.error('PR Gutter2: Error in updateDecorations:', error);
             console.error('Error getting diff for file:', relativePath, error);
             // Clear decorations on error
             this.clearDecorations();
@@ -447,6 +462,10 @@ class GitDiffProvider {
     }
     
     private applyDecorations(editor: vscode.TextEditor, changes: DiffChange[]) {
+        this.outputChannel.appendLine(`PR Gutter1: applyDecorations called with ${changes.length} changes`);
+        this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
+        console.log('PR Gutter: applyDecorations called with', changes.length, 'changes');
+        console.log('PR Gutter: Changes details:', JSON.stringify(changes));
         const addedDecorations: vscode.DecorationOptions[] = [];
         const modifiedDecorations: vscode.DecorationOptions[] = [];
         const deletedDecorations: vscode.DecorationOptions[] = [];
@@ -482,9 +501,16 @@ class GitDiffProvider {
             }
         }
         
+        this.outputChannel.appendLine(`PR Gutter1: Applying decorations - added: ${addedDecorations.length}, modified: ${modifiedDecorations.length}, deleted: ${deletedDecorations.length}`);
+        console.log('PR Gutter: Applying decorations - added:', addedDecorations.length, 'modified:', modifiedDecorations.length, 'deleted:', deletedDecorations.length);
+        console.log('PR Gutter: Added decoration types:', this.addedDecorationType);
+        console.log('PR Gutter: Added decorations:', JSON.stringify(addedDecorations));
+        
         editor.setDecorations(this.addedDecorationType, addedDecorations);
         editor.setDecorations(this.decorationType, modifiedDecorations);
         editor.setDecorations(this.deletedDecorationType, deletedDecorations);
+        
+        console.log('PR Gutter: Decorations applied successfully');
     }
     
     private getHoverMessage(type: 'added' | 'modified' | 'deleted', startLine: number, endLine: number): string {
