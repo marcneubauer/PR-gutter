@@ -3,10 +3,10 @@
   "displayName": "PR Gutter",
   "description": "Shows git diff highlighting in the gutter between current branch and a configurable target branch",
   "version": "0.0.1",
-  "publisher": "your-publisher-name",
+  "publisher": "marcneubauer",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/pr-gutter.git"
+    "url": "https://github.com/marcneubauer/pr-gutter.git"
   },
   "engines": {
     "vscode": "^1.74.0"
@@ -15,10 +15,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:pr-gutter.setTargetBranch",
-    "onCommand:pr-gutter.refreshDiff",
-    "onCommand:pr-gutter.showDebugInfo"
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -61,6 +58,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show border outline around changed lines"
+        },
+        "pr-gutter.showGutterIcons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show emoji icons in the gutter for changed lines"
+        },
+        "pr-gutter.showStartupNotification": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a notification when the extension activates"
         }
       }
     }
@@ -72,7 +79,7 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "reinstall": "npm run package && npx vsce package --allow-missing-repository && code --uninstall-extension your-publisher-name.pr-gutter ; code --install-extension /Users/mneubauer/Documents/code/randos/PR-gutter/pr-gutter-0.0.1.vsix"
+    "reinstall": "npm run package && npx vsce package --allow-missing-repository && code --uninstall-extension marcneubauer.pr-gutter ; code --install-extension /Users/marc/Documents/code/PR-gutter/pr-gutter-0.0.1.vsix"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

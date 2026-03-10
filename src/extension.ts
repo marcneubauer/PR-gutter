@@ -13,37 +13,29 @@ export function activate(context: vscode.ExtensionContext) {
         const gitDiffProvider = new GitDiffProvider(context, outputChannel);
         
         // Register commands
-        const setTargetBranchCommand = vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
-            console.log('PR Gutter: setTargetBranch command executed');
-            try {
-                await gitDiffProvider.setTargetBranch();
-            } catch (error) {
-                console.error('PR Gutter: Error in setTargetBranch:', error);
-                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
-            }
-        });
-        
-        const refreshDiffCommand = vscode.commands.registerCommand('pr-gutter.refreshDiff', async () => {
-            console.log('PR Gutter: refreshDiff command executed');
-            try {
-                await gitDiffProvider.refreshDiff();
-            } catch (error) {
-                console.error('PR Gutter: Error in refreshDiff:', error);
-                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
-            }
-        });
-        
-        const debugInfoCommand = vscode.commands.registerCommand('pr-gutter.showDebugInfo', async () => {
-            console.log('PR Gutter: showDebugInfo command executed');
-            try {
-                await gitDiffProvider.showDebugInfo();
-            } catch (error) {
-                console.error('PR Gutter: Error in showDebugInfo:', error);
-                vscode.window.showErrorMessage(`PR Gutter: ${error}`);
-            }
-        });
-        
-        context.subscriptions.push(setTargetBranchCommand, refreshDiffCommand, debugInfoCommand);
+        context.subscriptions.push(
+            vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
+                try {
+                    await gitDiffProvider.setTargetBranch();
+                } catch (error) {
+                    vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+                }
+            }),
+            vscode.commands.registerCommand('pr-gutter.refreshDiff', async () => {
+                try {
+                    await gitDiffProvider.refreshDiff();
+                } catch (error) {
+                    vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+                }
+            }),
+            vscode.commands.registerCommand('pr-gutter.showDebugInfo', async () => {
+                try {
+                    await gitDiffProvider.showDebugInfo();
+                } catch (error) {
+                    vscode.window.showErrorMessage(`PR Gutter: ${error}`);
+                }
+            })
+        );
         
         console.log('PR Gutter: Commands registered successfully');
         
@@ -55,7 +47,10 @@ export function activate(context: vscode.ExtensionContext) {
         
         outputChannel.appendLine('PR Gutter: Extension activated successfully');
         console.log('PR Gutter: Extension activated successfully');
-        vscode.window.showInformationMessage('PR Gutter extension activated');
+        const showStartupNotification = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showStartupNotification', true);
+        if (showStartupNotification) {
+            vscode.window.showInformationMessage('PR Gutter extension activated');
+        }
         
     } catch (error) {
         console.error('PR Gutter: Error during activation:', error);
@@ -63,7 +58,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
 }
 
-export function deactivate() {}
+export function deactivate() {
+    outputChannel.appendLine('PR Gutter: Extension deactivating...');
+}
 
 interface DiffChange {
     startLine: number;
@@ -95,14 +92,27 @@ class GitDiffProvider {
         
         try {
             // Create decoration types for different change types
+            const showGutterIcons = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showGutterIcons', true);
+            const modifiedGutterIcon = showGutterIcons ? {
+                gutterIconPath: context.asAbsolutePath('resources/question.svg'),
+                gutterIconSize: 'contain'
+            } : {};
+            const addedGutterIcon = showGutterIcons ? {
+                gutterIconPath: context.asAbsolutePath('resources/lol.svg'),
+                gutterIconSize: 'contain'
+            } : {};
+            const deletedGutterIcon = showGutterIcons ? {
+                gutterIconPath: context.asAbsolutePath('resources/bacon.svg'),
+                gutterIconSize: 'contain'
+            } : {};
+
             // Single line modified (all borders)
             this.modifiedSingleLineDecorationType = vscode.window.createTextEditorDecorationType({
                 isWholeLine: true,
                 borderWidth: '1px 1px 1px 2px',
                 borderStyle: 'solid',
                 borderColor: 'rgba(255, 165, 0, 0.8)',
-                gutterIconPath: context.asAbsolutePath('resources/question.svg'),
-                gutterIconSize: 'contain'
+                ...modifiedGutterIcon
             });
 
             // First line of multi-line modified (top, left, right)
@@ -111,8 +121,7 @@ class GitDiffProvider {
                 borderWidth: '1px 1px 0 2px',
                 borderStyle: 'solid',
                 borderColor: 'rgba(255, 165, 0, 0.8)',
-                gutterIconPath: context.asAbsolutePath('resources/question.svg'),
-                gutterIconSize: 'contain'
+                ...modifiedGutterIcon
             });
 
             // Middle lines of multi-line modified (left, right)
@@ -140,8 +149,7 @@ class GitDiffProvider {
                 borderWidth: '1px 1px 1px 2px',
                 borderStyle: 'solid',
                 borderColor: 'rgba(0, 255, 0, 0.8)',
-                gutterIconPath: context.asAbsolutePath('resources/lol.svg'),
-                gutterIconSize: 'contain'
+                ...addedGutterIcon
             });
 
             // First line of multi-line addition (top, left, right)
@@ -150,8 +158,7 @@ class GitDiffProvider {
                 borderWidth: '1px 1px 0 2px',
                 borderStyle: 'solid',
                 borderColor: 'rgba(0, 255, 0, 0.8)',
-                gutterIconPath: context.asAbsolutePath('resources/lol.svg'),
-                gutterIconSize: 'contain'
+                ...addedGutterIcon
             });
 
             // Middle lines of multi-line addition (left, right)
@@ -174,8 +181,7 @@ class GitDiffProvider {
             this.addedDecorationType = this.addedSingleLineDecorationType;
 
             this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
-                gutterIconPath: context.asAbsolutePath('resources/bacon.svg'), // Bacon emoji for minus
-                gutterIconSize: 'contain'
+                ...deletedGutterIcon
             });
 
             console.log('PR Gutter: Decoration types created successfully');
