@@ -5,7 +5,4 @@ a second line
  this is anew line
  one more line here for changes
 
-npm run package
-npx vsce package --allow-missing-repository
-code --uninstall-extension your-publisher-name.pr-gutter
-code --install-extension /Users/marc/Documents/Code/nodes/PR-gutter/pr-gutter-0.0.1.vsix
+npm run package && npx vsce package --allow-missing-repository && code --uninstall-extension your-publisher-name.pr-gutter && code --install-extension /Users/mneubauer/Documents/code/randos/PR-gutter/pr-gutter-0.0.1.vsix

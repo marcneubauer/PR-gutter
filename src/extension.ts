@@ -74,10 +74,20 @@ interface DiffChange {
 class GitDiffProvider {
     private decorationType: vscode.TextEditorDecorationType;
     private addedDecorationType: vscode.TextEditorDecorationType;
+    private addedFirstLineDecorationType: vscode.TextEditorDecorationType;
+    private addedMiddleLineDecorationType: vscode.TextEditorDecorationType;
+    private addedLastLineDecorationType: vscode.TextEditorDecorationType;
+    private addedSingleLineDecorationType: vscode.TextEditorDecorationType;
+    private modifiedSingleLineDecorationType: vscode.TextEditorDecorationType;
+    private modifiedFirstLineDecorationType: vscode.TextEditorDecorationType;
+    private modifiedMiddleLineDecorationType: vscode.TextEditorDecorationType;
+    private modifiedLastLineDecorationType: vscode.TextEditorDecorationType;
     private deletedDecorationType: vscode.TextEditorDecorationType;
     private git: SimpleGit | undefined;
     private workspaceRoot: string | undefined;
     private targetBranch: string = 'main';
+    private targetCommit: string = '';
+    private showOutline: boolean = true;
     
     constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
         this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
@@ -85,20 +95,85 @@ class GitDiffProvider {
         
         try {
             // Create decoration types for different change types
-            this.decorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(255, 165, 0, 0.2)', // Orange for modified
-                gutterIconPath: context.asAbsolutePath('resources/question.svg'), // Changed icon to question mark
+            // Single line modified (all borders)
+            this.modifiedSingleLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '1px 1px 1px 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(255, 165, 0, 0.8)',
+                gutterIconPath: context.asAbsolutePath('resources/question.svg'),
                 gutterIconSize: 'contain'
             });
 
-            this.addedDecorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(0, 255, 0, 0.1)', // Green for added
-                gutterIconPath: context.asAbsolutePath('resources/lol.svg'), // Funny emoji for plus
+            // First line of multi-line modified (top, left, right)
+            this.modifiedFirstLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '1px 1px 0 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(255, 165, 0, 0.8)',
+                gutterIconPath: context.asAbsolutePath('resources/question.svg'),
                 gutterIconSize: 'contain'
             });
+
+            // Middle lines of multi-line modified (left, right)
+            this.modifiedMiddleLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '0 1px 0 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(255, 165, 0, 0.8)'
+            });
+
+            // Last line of multi-line modified (bottom, left, right)
+            this.modifiedLastLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '0 1px 1px 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(255, 165, 0, 0.8)'
+            });
+
+            // Legacy decoration type (kept for compatibility)
+            this.decorationType = this.modifiedSingleLineDecorationType;
+
+            // Single line addition (all borders)
+            this.addedSingleLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '1px 1px 1px 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(0, 255, 0, 0.8)',
+                gutterIconPath: context.asAbsolutePath('resources/lol.svg'),
+                gutterIconSize: 'contain'
+            });
+
+            // First line of multi-line addition (top, left, right)
+            this.addedFirstLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '1px 1px 0 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(0, 255, 0, 0.8)',
+                gutterIconPath: context.asAbsolutePath('resources/lol.svg'),
+                gutterIconSize: 'contain'
+            });
+
+            // Middle lines of multi-line addition (left, right)
+            this.addedMiddleLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '0 1px 0 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(0, 255, 0, 0.8)'
+            });
+
+            // Last line of multi-line addition (bottom, left, right)
+            this.addedLastLineDecorationType = vscode.window.createTextEditorDecorationType({
+                isWholeLine: true,
+                borderWidth: '0 1px 1px 2px',
+                borderStyle: 'solid',
+                borderColor: 'rgba(0, 255, 0, 0.8)'
+            });
+
+            // Legacy decoration type (kept for compatibility)
+            this.addedDecorationType = this.addedSingleLineDecorationType;
 
             this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
-                backgroundColor: 'rgba(255, 0, 0, 0.1)', // Red for deleted
                 gutterIconPath: context.asAbsolutePath('resources/bacon.svg'), // Bacon emoji for minus
                 gutterIconSize: 'contain'
             });
@@ -136,7 +211,7 @@ class GitDiffProvider {
             
             // Listen to configuration changes
             vscode.workspace.onDidChangeConfiguration((event: vscode.ConfigurationChangeEvent) => {
-                if (event.affectsConfiguration('pr-gutter.targetBranch')) {
+                if (event.affectsConfiguration('pr-gutter.targetBranch') || event.affectsConfiguration('pr-gutter.targetCommit') || event.affectsConfiguration('pr-gutter.showOutline')) {
                     this.updateTargetBranch();
                     this.refreshDiff();
                 }
@@ -163,6 +238,8 @@ class GitDiffProvider {
     
     private updateTargetBranch() {
         this.targetBranch = vscode.workspace.getConfiguration('pr-gutter').get<string>('targetBranch', 'main');
+        this.targetCommit = vscode.workspace.getConfiguration('pr-gutter').get<string>('targetCommit', '');
+        this.showOutline = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showOutline', true);
     }
     
     async setTargetBranch() {
@@ -277,21 +354,31 @@ class GitDiffProvider {
                 return;
             }
             
-            // Check if target branch exists locally or remotely
-            const branches = await this.git.branch();
-            const targetExists = branches.all.includes(this.targetBranch) || 
-                               branches.all.includes(`remotes/origin/${this.targetBranch}`);
-            
-            if (!targetExists) {
-                vscode.window.showWarningMessage(`Target branch '${this.targetBranch}' not found. Available branches: ${branches.all.join(', ')}`);
-                return;
-            }
-            
-            // Don't compare if we're already on the target branch
-            if (currentBranch === this.targetBranch) {
-                // Clear all decorations
-                this.clearDecorations();
-                return;
+            // If using commit hash, validate it exists
+            if (this.targetCommit) {
+                try {
+                    await this.git.revparse([this.targetCommit]);
+                } catch {
+                    vscode.window.showWarningMessage(`Target commit '${this.targetCommit}' not found`);
+                    return;
+                }
+            } else {
+                // Check if target branch exists locally or remotely
+                const branches = await this.git.branch();
+                const targetExists = branches.all.includes(this.targetBranch) || 
+                                   branches.all.includes(`remotes/origin/${this.targetBranch}`);
+                
+                if (!targetExists) {
+                    vscode.window.showWarningMessage(`Target branch '${this.targetBranch}' not found. Available branches: ${branches.all.join(', ')}`);
+                    return;
+                }
+                
+                // Don't compare if we're already on the target branch
+                if (currentBranch === this.targetBranch) {
+                    // Clear all decorations
+                    this.clearDecorations();
+                    return;
+                }
             }
             
             // Update decorations for currently visible editors
@@ -306,8 +393,14 @@ class GitDiffProvider {
     private clearDecorations() {
         const activeEditor = vscode.window.activeTextEditor;
         if (activeEditor) {
-            activeEditor.setDecorations(this.addedDecorationType, []);
-            activeEditor.setDecorations(this.decorationType, []);
+            activeEditor.setDecorations(this.addedSingleLineDecorationType, []);
+            activeEditor.setDecorations(this.addedFirstLineDecorationType, []);
+            activeEditor.setDecorations(this.addedMiddleLineDecorationType, []);
+            activeEditor.setDecorations(this.addedLastLineDecorationType, []);
+            activeEditor.setDecorations(this.modifiedSingleLineDecorationType, []);
+            activeEditor.setDecorations(this.modifiedFirstLineDecorationType, []);
+            activeEditor.setDecorations(this.modifiedMiddleLineDecorationType, []);
+            activeEditor.setDecorations(this.modifiedLastLineDecorationType, []);
             activeEditor.setDecorations(this.deletedDecorationType, []);
         }
     }
@@ -335,24 +428,45 @@ class GitDiffProvider {
             let diffResult = '';
             let diffCommand = '';
             
-            try {
-                // First try: compare with remote branch if it exists
-                diffCommand = `origin/${this.targetBranch}...HEAD`;
-                diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-            } catch {
+            // Determine what to compare against: commit hash or branch
+            const target = this.targetCommit || this.targetBranch;
+            const isCommit = !!this.targetCommit;
+            
+            if (isCommit) {
+                // If target is a commit hash, use it directly
                 try {
-                    // Second try: compare with local branch
-                    diffCommand = `${this.targetBranch}...HEAD`;
+                    diffCommand = `${target}...HEAD`;
                     diffResult = await this.git.diff([diffCommand, '--', relativePath]);
                 } catch {
                     try {
-                        // Third try: compare with branch directly
-                        diffCommand = `${this.targetBranch}..HEAD`;
+                        diffCommand = `${target}..HEAD`;
                         diffResult = await this.git.diff([diffCommand, '--', relativePath]);
                     } catch {
-                        // Fourth try: simple diff
-                        diffCommand = `${this.targetBranch} HEAD`;
-                        diffResult = await this.git.diff([this.targetBranch, 'HEAD', '--', relativePath]);
+                        diffCommand = `${target} HEAD`;
+                        diffResult = await this.git.diff([target, 'HEAD', '--', relativePath]);
+                    }
+                }
+            } else {
+                // If target is a branch, try different strategies
+                try {
+                    // First try: compare with remote branch if it exists
+                    diffCommand = `origin/${target}...HEAD`;
+                    diffResult = await this.git.diff([diffCommand, '--', relativePath]);
+                } catch {
+                    try {
+                        // Second try: compare with local branch
+                        diffCommand = `${target}...HEAD`;
+                        diffResult = await this.git.diff([diffCommand, '--', relativePath]);
+                    } catch {
+                        try {
+                            // Third try: compare with branch directly
+                            diffCommand = `${target}..HEAD`;
+                            diffResult = await this.git.diff([diffCommand, '--', relativePath]);
+                        } catch {
+                            // Fourth try: simple diff
+                            diffCommand = `${target} HEAD`;
+                            diffResult = await this.git.diff([target, 'HEAD', '--', relativePath]);
+                        }
                     }
                 }
             }
@@ -466,8 +580,15 @@ class GitDiffProvider {
         this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
         console.log('PR Gutter: applyDecorations called with', changes.length, 'changes');
         console.log('PR Gutter: Changes details:', JSON.stringify(changes));
-        const addedDecorations: vscode.DecorationOptions[] = [];
-        const modifiedDecorations: vscode.DecorationOptions[] = [];
+        
+        const addedSingleLineDecorations: vscode.DecorationOptions[] = [];
+        const addedFirstLineDecorations: vscode.DecorationOptions[] = [];
+        const addedMiddleLineDecorations: vscode.DecorationOptions[] = [];
+        const addedLastLineDecorations: vscode.DecorationOptions[] = [];
+        const modifiedSingleLineDecorations: vscode.DecorationOptions[] = [];
+        const modifiedFirstLineDecorations: vscode.DecorationOptions[] = [];
+        const modifiedMiddleLineDecorations: vscode.DecorationOptions[] = [];
+        const modifiedLastLineDecorations: vscode.DecorationOptions[] = [];
         const deletedDecorations: vscode.DecorationOptions[] = [];
         
         for (const change of changes) {
@@ -479,35 +600,109 @@ class GitDiffProvider {
                 continue;
             }
             
-            const startChar = 0;
-            const endChar = editor.document.lineAt(endLine).text.length;
-            
-            const range = new vscode.Range(startLine, startChar, endLine, endChar);
-            const decoration: vscode.DecorationOptions = { 
-                range,
-                hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
-            };
-            
-            switch (change.type) {
-                case 'added':
-                    addedDecorations.push(decoration);
-                    break;
-                case 'modified':
-                    modifiedDecorations.push(decoration);
-                    break;
-                case 'deleted':
-                    deletedDecorations.push(decoration);
-                    break;
+            if (change.type === 'added') {
+                if (this.showOutline) {
+                    // Handle added lines with proper border decoration based on position
+                    const lineCount = endLine - startLine + 1;
+                    
+                    if (lineCount === 1) {
+                        // Single line addition - use all borders
+                        const range = new vscode.Range(startLine, 0, startLine, 0);
+                        addedSingleLineDecorations.push({ 
+                            range,
+                            hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                        });
+                    } else {
+                        // Multi-line addition - apply different borders to first, middle, and last lines
+                        for (let line = startLine; line <= endLine; line++) {
+                            const range = new vscode.Range(line, 0, line, 0);
+                            const decoration = {
+                                range,
+                                hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                            };
+                            
+                            if (line === startLine) {
+                                // First line: top, left, right borders
+                                addedFirstLineDecorations.push(decoration);
+                            } else if (line === endLine) {
+                                // Last line: bottom, left, right borders
+                                addedLastLineDecorations.push(decoration);
+                            } else {
+                                // Middle lines: left, right borders only
+                                addedMiddleLineDecorations.push(decoration);
+                            }
+                        }
+                    }
+                } else {
+                    // No outline - just show gutter icon on first line
+                    const range = new vscode.Range(startLine, 0, startLine, 0);
+                    addedSingleLineDecorations.push({ 
+                        range,
+                        hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                    });
+                }
+            } else if (change.type === 'modified') {
+                if (this.showOutline) {
+                    // Handle modified lines with proper border decoration based on position
+                    const lineCount = endLine - startLine + 1;
+                    
+                    if (lineCount === 1) {
+                        // Single line modified - use all borders
+                        const range = new vscode.Range(startLine, 0, startLine, 0);
+                        modifiedSingleLineDecorations.push({ 
+                            range,
+                            hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                        });
+                    } else {
+                        // Multi-line modified - apply different borders to first, middle, and last lines
+                        for (let line = startLine; line <= endLine; line++) {
+                            const range = new vscode.Range(line, 0, line, 0);
+                            const decoration = {
+                                range,
+                                hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                            };
+                            
+                            if (line === startLine) {
+                                // First line: top, left, right borders
+                                modifiedFirstLineDecorations.push(decoration);
+                            } else if (line === endLine) {
+                                // Last line: bottom, left, right borders
+                                modifiedLastLineDecorations.push(decoration);
+                            } else {
+                                // Middle lines: left, right borders only
+                                modifiedMiddleLineDecorations.push(decoration);
+                            }
+                        }
+                    }
+                } else {
+                    // No outline - just show gutter icon on first line
+                    const range = new vscode.Range(startLine, 0, startLine, 0);
+                    modifiedSingleLineDecorations.push({ 
+                        range,
+                        hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                    });
+                }
+            } else if (change.type === 'deleted') {
+                // Handle deleted lines
+                const range = new vscode.Range(startLine, 0, endLine, 0);
+                deletedDecorations.push({ 
+                    range,
+                    hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
+                });
             }
         }
         
-        this.outputChannel.appendLine(`PR Gutter1: Applying decorations - added: ${addedDecorations.length}, modified: ${modifiedDecorations.length}, deleted: ${deletedDecorations.length}`);
-        console.log('PR Gutter: Applying decorations - added:', addedDecorations.length, 'modified:', modifiedDecorations.length, 'deleted:', deletedDecorations.length);
-        console.log('PR Gutter: Added decoration types:', this.addedDecorationType);
-        console.log('PR Gutter: Added decorations:', JSON.stringify(addedDecorations));
+        this.outputChannel.appendLine(`PR Gutter1: Applying decorations - added single: ${addedSingleLineDecorations.length}, first: ${addedFirstLineDecorations.length}, middle: ${addedMiddleLineDecorations.length}, last: ${addedLastLineDecorations.length}, modified single: ${modifiedSingleLineDecorations.length}, first: ${modifiedFirstLineDecorations.length}, middle: ${modifiedMiddleLineDecorations.length}, last: ${modifiedLastLineDecorations.length}, deleted: ${deletedDecorations.length}`);
+        console.log('PR Gutter: Applying decorations - added single:', addedSingleLineDecorations.length, 'first:', addedFirstLineDecorations.length, 'middle:', addedMiddleLineDecorations.length, 'last:', addedLastLineDecorations.length, 'modified single:', modifiedSingleLineDecorations.length, 'first:', modifiedFirstLineDecorations.length, 'middle:', modifiedMiddleLineDecorations.length, 'last:', modifiedLastLineDecorations.length, 'deleted:', deletedDecorations.length);
         
-        editor.setDecorations(this.addedDecorationType, addedDecorations);
-        editor.setDecorations(this.decorationType, modifiedDecorations);
+        editor.setDecorations(this.addedSingleLineDecorationType, addedSingleLineDecorations);
+        editor.setDecorations(this.addedFirstLineDecorationType, addedFirstLineDecorations);
+        editor.setDecorations(this.addedMiddleLineDecorationType, addedMiddleLineDecorations);
+        editor.setDecorations(this.addedLastLineDecorationType, addedLastLineDecorations);
+        editor.setDecorations(this.modifiedSingleLineDecorationType, modifiedSingleLineDecorations);
+        editor.setDecorations(this.modifiedFirstLineDecorationType, modifiedFirstLineDecorations);
+        editor.setDecorations(this.modifiedMiddleLineDecorationType, modifiedMiddleLineDecorations);
+        editor.setDecorations(this.modifiedLastLineDecorationType, modifiedLastLineDecorations);
         editor.setDecorations(this.deletedDecorationType, deletedDecorations);
         
         console.log('PR Gutter: Decorations applied successfully');
@@ -515,15 +710,15 @@ class GitDiffProvider {
     
     private getHoverMessage(type: 'added' | 'modified' | 'deleted', startLine: number, endLine: number): string {
         const lineText = startLine === endLine ? `line ${startLine + 1}` : `lines ${startLine + 1}-${endLine + 1}`;
-        const branch = this.targetBranch;
+        const target = this.targetCommit ? `commit ${this.targetCommit.substring(0, 7)}` : this.targetBranch;
         
         switch (type) {
             case 'added':
-                return `Added ${lineText} (not in ${branch})`;
+                return `Added ${lineText} (not in ${target})`;
             case 'modified':
-                return `Modified ${lineText} (different from ${branch})`;
+                return `Modified ${lineText} (different from ${target})`;
             case 'deleted':
-                return `Deleted ${lineText} (exists in ${branch})`;
+                return `Deleted ${lineText} (exists in ${target})`;
         }
     }
 }

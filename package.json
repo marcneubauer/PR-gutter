@@ -45,12 +45,22 @@
         "pr-gutter.targetBranch": {
           "type": "string",
           "default": "main",
-          "description": "The target branch to compare against"
+          "description": "The target branch to compare against (ignored if targetCommit is set)"
+        },
+        "pr-gutter.targetCommit": {
+          "type": "string",
+          "default": "",
+          "description": "The target commit hash to compare against (takes precedence over targetBranch if set)"
         },
         "pr-gutter.autoRefresh": {
           "type": "boolean",
           "default": true,
           "description": "Automatically refresh diff when files change"
+        },
+        "pr-gutter.showOutline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show border outline around changed lines"
         }
       }
     }
@@ -61,7 +71,8 @@
     "watch": "webpack --watch",
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
-    "watch-tests": "tsc -p . -w --outDir out"
+    "watch-tests": "tsc -p . -w --outDir out",
+    "reinstall": "npm run package && npx vsce package --allow-missing-repository && code --uninstall-extension your-publisher-name.pr-gutter ; code --install-extension /Users/mneubauer/Documents/code/randos/PR-gutter/pr-gutter-0.0.1.vsix"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
