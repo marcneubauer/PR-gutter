@@ -1,17 +1,13 @@
 import * as vscode from 'vscode';
-import { simpleGit, SimpleGit } from 'simple-git';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs/promises';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { DiffChange, parseDiff } from './diffParser';
-
-const execFileAsync = promisify(execFile);
+import { GitCli } from './gitCli';
 
 /** Per-workspace-folder git state (multi-root support). */
 interface RepoContext {
-    git: SimpleGit;
+    git: GitCli;
     root: string;
     isRepo?: boolean;
     detectedDefaultBranch?: string;
@@ -316,7 +312,7 @@ class GitDiffProvider implements vscode.Disposable {
             return ctx;
         }
 
-        const created: RepoContext = { git: simpleGit(root), root, baselineCache: new Map() };
+        const created: RepoContext = { git: new GitCli(root), root, baselineCache: new Map() };
         this.repos.set(root, created);
 
         // Invalidate this repo's caches when its git state moves
@@ -365,11 +361,7 @@ class GitDiffProvider implements vscode.Disposable {
 
     private async isRepo(ctx: RepoContext): Promise<boolean> {
         if (ctx.isRepo === undefined) {
-            try {
-                ctx.isRepo = await ctx.git.checkIsRepo();
-            } catch {
-                ctx.isRepo = false;
-            }
+            ctx.isRepo = await ctx.git.isRepo();
             this.trace(`${ctx.root} is git repository: ${ctx.isRepo}`);
         }
         return ctx.isRepo;
@@ -391,25 +383,17 @@ class GitDiffProvider implements vscode.Disposable {
      * Detect the repository's default branch: prefer origin/HEAD, then fall back
      * to common default branch names that exist locally or on origin.
      */
-    private async detectDefaultBranch(git: SimpleGit): Promise<string> {
-        try {
-            const ref = (await git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim();
-            if (ref) {
-                return ref.replace(/^origin\//, '');
-            }
-        } catch {
-            // No origin/HEAD ref (e.g. no remote, or never fetched) - fall through
+    private async detectDefaultBranch(git: GitCli): Promise<string> {
+        // origin/HEAD points at the remote's default branch (when fetched)
+        const originHead = await git.symbolicRef('refs/remotes/origin/HEAD');
+        if (originHead) {
+            return originHead.replace(/^origin\//, '');
         }
 
-        try {
-            const branches = await git.branch();
-            for (const candidate of ['main', 'master', 'develop', 'trunk']) {
-                if (branches.all.includes(candidate) || branches.all.includes(`remotes/origin/${candidate}`)) {
-                    return candidate;
-                }
+        for (const candidate of ['main', 'master', 'develop', 'trunk']) {
+            if (await git.refExists(`refs/heads/${candidate}`) || await git.refExists(`refs/remotes/origin/${candidate}`)) {
+                return candidate;
             }
-        } catch {
-            // ignore and fall through to default
         }
 
         return 'main';
@@ -430,22 +414,17 @@ class GitDiffProvider implements vscode.Disposable {
 
         let targetRef: string | undefined;
         if (this.targetCommit) {
-            try {
-                await ctx.git.revparse(['--verify', `${this.targetCommit}^{commit}`]);
-                targetRef = this.targetCommit;
-            } catch {
+            if (!(await ctx.git.isCommit(this.targetCommit))) {
                 this.warnOnceAboutTarget(`PR Gutter: target commit '${this.targetCommit}' not found.`, this.targetCommit);
                 return undefined;
             }
+            targetRef = this.targetCommit;
         } else {
             // Existence check for a single ref - avoids listing every branch
             for (const candidate of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
-                try {
-                    await ctx.git.raw(['show-ref', '--verify', '--quiet', candidate]);
+                if (await ctx.git.refExists(candidate)) {
                     targetRef = candidate;
                     break;
-                } catch {
-                    // ref does not exist - try next candidate
                 }
             }
             if (!targetRef) {
@@ -455,7 +434,7 @@ class GitDiffProvider implements vscode.Disposable {
         }
 
         try {
-            const base = (await ctx.git.raw(['merge-base', 'HEAD', targetRef])).trim();
+            const base = await ctx.git.mergeBase('HEAD', targetRef);
             ctx.cachedDiffBase = base;
             ctx.cachedDiffBaseKey = key;
             this.info(`diff base ${base.substring(0, 7)} (merge-base of HEAD and ${targetRef}) in ${ctx.root}`);
@@ -484,32 +463,12 @@ class GitDiffProvider implements vscode.Disposable {
 
         let content = '';
         try {
-            content = await ctx.git.show([`${base}:${this.toGitPath(relativePath)}`]);
+            content = await ctx.git.show(`${base}:${this.toGitPath(relativePath)}`);
         } catch {
             // File does not exist at the base - treat as empty
         }
         ctx.baselineCache.set(key, content);
         return content;
-    }
-
-    /**
-     * Diff two files on disk. git exits with code 1 when the files differ,
-     * which execFile reports as an error - treat it as success.
-     */
-    private async diffNoIndex(cwd: string, fileA: string, fileB: string): Promise<string> {
-        try {
-            const { stdout } = await execFileAsync(
-                'git', ['diff', '--no-index', '--', fileA, fileB],
-                { cwd, maxBuffer: 50 * 1024 * 1024 }
-            );
-            return stdout;
-        } catch (error) {
-            const e = error as { code?: unknown; stdout?: unknown };
-            if (e && e.code === 1 && typeof e.stdout === 'string') {
-                return e.stdout;
-            }
-            throw error;
-        }
     }
 
     /**
@@ -526,7 +485,7 @@ class GitDiffProvider implements vscode.Disposable {
                 fs.writeFile(fileA, baseline, 'utf8'),
                 fs.writeFile(fileB, bufferText, 'utf8')
             ]);
-            return await this.diffNoIndex(ctx.root, fileA, fileB);
+            return await ctx.git.diffNoIndex(fileA, fileB);
         } finally {
             fs.rm(dir, { recursive: true, force: true }).catch(() => { /* best effort */ });
         }
@@ -583,9 +542,8 @@ class GitDiffProvider implements vscode.Disposable {
         }
 
         try {
-            // Get all branches
-            const branches = await ctx.git.branch();
-            const branchNames = branches.all.filter((branch: string) => !branch.startsWith('remotes/'));
+            // Get all local branches
+            const branchNames = await ctx.git.localBranches();
 
             const autoDetectLabel = 'Auto-detect (use repository default branch)';
             const selectedBranch = await vscode.window.showQuickPick([autoDetectLabel, ...branchNames], {
@@ -633,16 +591,16 @@ class GitDiffProvider implements vscode.Disposable {
                 return;
             }
 
-            const status = await ctx.git.status();
-            const branches = await ctx.git.branch();
+            const currentBranch = await ctx.git.currentBranch();
+            const branchNames = await ctx.git.localBranches();
             const activeEditor = vscode.window.activeTextEditor;
             const targetBranch = await this.targetBranchFor(ctx);
 
             let debugInfo = `**PR Gutter Debug Info**\n\n`;
             debugInfo += `Repository root: ${ctx.root}\n`;
-            debugInfo += `Current branch: ${status.current}\n`;
+            debugInfo += `Current branch: ${currentBranch ?? '(detached HEAD)'}\n`;
             debugInfo += `Target branch: ${targetBranch}${this.targetBranchSetting ? '' : ' (auto-detected)'}\n`;
-            debugInfo += `Available branches: ${branches.all.join(', ')}\n`;
+            debugInfo += `Local branches: ${branchNames.join(', ')}\n`;
 
             if (activeEditor) {
                 const filePath = activeEditor.document.fileName;
@@ -653,7 +611,7 @@ class GitDiffProvider implements vscode.Disposable {
                 try {
                     const base = await this.resolveDiffBase(ctx);
                     debugInfo += `Diff base: ${base ?? 'unresolved'}\n`;
-                    const diffResult = base ? await ctx.git.diff([base, '--', relativePath]) : '';
+                    const diffResult = base ? await ctx.git.diffFile(base, relativePath) : '';
                     debugInfo += `Diff result length: ${diffResult.length} chars\n`;
                     if (diffResult.trim()) {
                         debugInfo += `Diff preview:\n\`\`\`\n${diffResult.substring(0, 500)}\n\`\`\`\n`;
@@ -722,7 +680,7 @@ class GitDiffProvider implements vscode.Disposable {
                 diffResult = await this.diffBuffer(ctx, base, relativePath, document.getText());
                 this.trace(`live-diffed unsaved buffer against ${base.substring(0, 7)} for ${relativePath}`);
             } else {
-                diffResult = await ctx.git.diff([base, '--', relativePath]);
+                diffResult = await ctx.git.diffFile(base, relativePath);
                 this.trace(`diffed working tree against ${base.substring(0, 7)} for ${relativePath}`);
             }
 

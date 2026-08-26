@@ -2,7 +2,7 @@
 
 All notable changes to the "pr-gutter" extension will be documented in this file.
 
-## [Unreleased]
+## [0.1.0] - 2026-08-26
 
 ### Fixed
 
@@ -44,6 +44,7 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ### Removed
 
+- The `simple-git` dependency - git is now invoked directly through a thin `GitCli` wrapper (`src/gitCli.ts`), leaving the extension with zero runtime dependencies and a smaller bundle
 - Committed build artifacts (`dist/`, `out/`, `*.vsix`) removed from the repository and gitignored
 
 ## [0.0.1] - 2025-11-09

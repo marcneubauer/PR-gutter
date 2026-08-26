@@ -2,7 +2,7 @@
   "name": "pr-gutter",
   "displayName": "PR Gutter",
   "description": "Shows git diff highlighting in the gutter between current branch and a configurable target branch",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "marcneubauer",
   "license": "MIT",
   "repository": {
@@ -117,8 +117,5 @@
     "vitest": "^3.0.0",
     "webpack": "^5.102.1",
     "webpack-cli": "^6.0.1"
-  },
-  "dependencies": {
-    "simple-git": "^3.30.0"
   }
 }
