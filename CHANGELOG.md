@@ -11,6 +11,7 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ### Added
 
+- Live decoration updates while typing: unsaved buffer contents are diffed against the target (debounced; disable with `pr-gutter.liveUpdate`)
 - Unit tests for the diff parser (vitest), run in CI
 
 - Auto-detection of the repository default branch (origin/HEAD, falling back to main/master/develop/trunk) when `pr-gutter.targetBranch` is empty (now the default)

@@ -54,9 +54,10 @@ You can configure the extension through VS Code settings:
 
 ```json
 {
-  "pr-gutter.targetBranch": "main",        // Branch to compare against
+  "pr-gutter.targetBranch": "",            // Branch to compare against ("" = auto-detect)
   "pr-gutter.targetCommit": "",            // Commit hash (takes precedence over targetBranch)
   "pr-gutter.autoRefresh": true,           // Auto-refresh on file changes
+  "pr-gutter.liveUpdate": true,            // Update while typing (unsaved changes)
   "pr-gutter.showOutline": true,           // Border outline around changed lines
   "pr-gutter.showGutterIcons": true,       // Emoji icons in the gutter
   "pr-gutter.showStartupNotification": true // Notification on activation

@@ -1,7 +1,13 @@
 import * as vscode from 'vscode';
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs/promises';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { DiffChange, parseDiff } from './diffParser';
+
+const execFileAsync = promisify(execFile);
 
 // Create output channel for logging
 const outputChannel = vscode.window.createOutputChannel('PR Gutter');
@@ -85,6 +91,7 @@ class GitDiffProvider {
     private cachedDiffBase: string | undefined;
     private cachedDiffBaseKey: string | undefined;
     private refreshTimer: NodeJS.Timeout | undefined;
+    private baselineCache = new Map<string, string>();
 
     constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
         this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
@@ -237,6 +244,16 @@ class GitDiffProvider {
                 vscode.window.onDidChangeActiveTextEditor(() => {
                     this.scheduleUpdate();
                 });
+
+                // Live updates while typing (unsaved changes)
+                const liveUpdate = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('liveUpdate', true);
+                if (liveUpdate) {
+                    vscode.workspace.onDidChangeTextDocument((event: vscode.TextDocumentChangeEvent) => {
+                        if (event.contentChanges.length > 0 && event.document === vscode.window.activeTextEditor?.document) {
+                            this.scheduleUpdate(300);
+                        }
+                    });
+                }
             }
 
             // Invalidate the cached diff base when git state moves
@@ -308,6 +325,7 @@ class GitDiffProvider {
     private invalidateDiffBase() {
         this.cachedDiffBase = undefined;
         this.cachedDiffBaseKey = undefined;
+        this.baselineCache.clear();
     }
 
     /**
@@ -365,9 +383,76 @@ class GitDiffProvider {
         }
     }
 
+    private toGitPath(relativePath: string): string {
+        return relativePath.split(path.sep).join('/');
+    }
+
+    /**
+     * Contents of the file at the diff base, cached per base+path.
+     * Returns '' when the file does not exist at the base (newly added file).
+     */
+    private async getBaselineContent(base: string, relativePath: string): Promise<string> {
+        const key = `${base}:${relativePath}`;
+        const cached = this.baselineCache.get(key);
+        if (cached !== undefined) {
+            return cached;
+        }
+
+        let content = '';
+        if (this.git) {
+            try {
+                content = await this.git.show([`${base}:${this.toGitPath(relativePath)}`]);
+            } catch {
+                // File does not exist at the base - treat as empty
+            }
+        }
+        this.baselineCache.set(key, content);
+        return content;
+    }
+
+    /**
+     * Diff two files on disk. git exits with code 1 when the files differ,
+     * which execFile reports as an error - treat it as success.
+     */
+    private async diffNoIndex(fileA: string, fileB: string): Promise<string> {
+        try {
+            const { stdout } = await execFileAsync(
+                'git', ['diff', '--no-index', '--', fileA, fileB],
+                { cwd: this.workspaceRoot, maxBuffer: 50 * 1024 * 1024 }
+            );
+            return stdout;
+        } catch (error) {
+            const e = error as { code?: unknown; stdout?: unknown };
+            if (e && e.code === 1 && typeof e.stdout === 'string') {
+                return e.stdout;
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Diff an unsaved buffer against the baseline content at the diff base,
+     * using temp files so unsaved edits are reflected immediately.
+     */
+    private async diffBuffer(base: string, relativePath: string, bufferText: string): Promise<string> {
+        const baseline = await this.getBaselineContent(base, relativePath);
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pr-gutter-'));
+        const fileA = path.join(dir, 'base');
+        const fileB = path.join(dir, 'buffer');
+        try {
+            await Promise.all([
+                fs.writeFile(fileA, baseline, 'utf8'),
+                fs.writeFile(fileB, bufferText, 'utf8')
+            ]);
+            return await this.diffNoIndex(fileA, fileB);
+        } finally {
+            fs.rm(dir, { recursive: true, force: true }).catch(() => { /* best effort */ });
+        }
+    }
+
     /**
      * Debounced decoration update - collapses bursts of triggers
-     * (Save All, format-on-save, rapid editor switches) into one refresh.
+     * (Save All, format-on-save, typing, rapid editor switches) into one refresh.
      */
     private scheduleUpdate(delayMs: number = 150) {
         if (this.refreshTimer) {
@@ -563,10 +648,15 @@ class GitDiffProvider {
                 return;
             }
 
-            const diffResult = await this.git.diff([base, '--', relativePath]);
-
-            // Debug output
-            console.log(`PR Gutter: Comparing working tree against ${base.substring(0, 7)} for ${relativePath}`);
+            let diffResult: string;
+            if (activeEditor.document.isDirty) {
+                // Unsaved changes: diff the live buffer against the baseline
+                diffResult = await this.diffBuffer(base, relativePath, activeEditor.document.getText());
+                console.log(`PR Gutter: Live-diffed unsaved buffer against ${base.substring(0, 7)} for ${relativePath}`);
+            } else {
+                diffResult = await this.git.diff([base, '--', relativePath]);
+                console.log(`PR Gutter: Comparing working tree against ${base.substring(0, 7)} for ${relativePath}`);
+            }
             console.log(`PR Gutter: Diff result length: ${diffResult.length}`);
             if (diffResult.trim()) {
                 console.log(`PR Gutter: Diff preview:`, diffResult.substring(0, 200));
