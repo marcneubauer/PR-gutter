@@ -87,7 +87,9 @@ class GitDiffProvider {
     private targetCommit: string = '';
     private showOutline: boolean = true;
     private warnedTargets = new Set<string>();
-    private warnedDetachedHead = false;
+    private cachedDiffBase: string | undefined;
+    private cachedDiffBaseKey: string | undefined;
+    private refreshTimer: NodeJS.Timeout | undefined;
 
     constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
         this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
@@ -197,10 +199,11 @@ class GitDiffProvider {
     async initialize() {
         // Get workspace root
         if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-            this.workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+            this.workspaceRoot = workspaceRoot;
             console.log(`PR Gutter: Detected workspace root: ${this.workspaceRoot}`);
 
-            this.git = simpleGit(this.workspaceRoot);
+            this.git = simpleGit(workspaceRoot);
 
             // Test if this is actually a git repository
             try {
@@ -229,14 +232,30 @@ class GitDiffProvider {
             // Listen to file changes
             const autoRefresh = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('autoRefresh', true);
             if (autoRefresh) {
-                vscode.workspace.onDidSaveTextDocument(() => {
-                    this.refreshDiff();
+                vscode.workspace.onDidSaveTextDocument((document: vscode.TextDocument) => {
+                    // Only re-diff when the saved document is the one being displayed
+                    if (document === vscode.window.activeTextEditor?.document) {
+                        this.scheduleUpdate();
+                    }
                 });
 
                 vscode.window.onDidChangeActiveTextEditor(() => {
-                    this.updateDecorations();
+                    this.scheduleUpdate();
                 });
             }
+
+            // Invalidate the cached diff base when git state moves
+            // (branch switches, commits, fetches)
+            const gitWatcher = vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(workspaceRoot, '.git/{HEAD,refs/**}')
+            );
+            const onGitStateChange = () => {
+                this.invalidateDiffBase();
+                this.scheduleUpdate(300);
+            };
+            gitWatcher.onDidChange(onGitStateChange);
+            gitWatcher.onDidCreate(onGitStateChange);
+            gitWatcher.onDidDelete(onGitStateChange);
 
             // Initial diff update
             await this.refreshDiff();
@@ -289,6 +308,80 @@ class GitDiffProvider {
         }
 
         return 'main';
+    }
+
+    private invalidateDiffBase() {
+        this.cachedDiffBase = undefined;
+        this.cachedDiffBaseKey = undefined;
+    }
+
+    /**
+     * Resolve the commit to diff the working tree against: the merge-base of
+     * HEAD and the target (origin/<branch> preferred, then local <branch>, or
+     * the configured commit). Cached until the target setting changes or git
+     * state moves (branch switch, commit, fetch).
+     */
+    private async resolveDiffBase(): Promise<string | undefined> {
+        if (!this.git) {
+            return undefined;
+        }
+
+        const key = this.targetCommit || this.targetBranch;
+        if (this.cachedDiffBase && this.cachedDiffBaseKey === key) {
+            return this.cachedDiffBase;
+        }
+
+        let targetRef: string | undefined;
+        if (this.targetCommit) {
+            try {
+                await this.git.revparse(['--verify', `${this.targetCommit}^{commit}`]);
+                targetRef = this.targetCommit;
+            } catch {
+                this.warnOnceAboutTarget(`PR Gutter: target commit '${this.targetCommit}' not found.`, this.targetCommit);
+                return undefined;
+            }
+        } else {
+            // Existence check for a single ref - avoids listing every branch
+            for (const candidate of [`refs/remotes/origin/${this.targetBranch}`, `refs/heads/${this.targetBranch}`]) {
+                try {
+                    await this.git.raw(['show-ref', '--verify', '--quiet', candidate]);
+                    targetRef = candidate;
+                    break;
+                } catch {
+                    // ref does not exist - try next candidate
+                }
+            }
+            if (!targetRef) {
+                this.warnOnceAboutTarget(`PR Gutter: target branch '${this.targetBranch}' not found.`, this.targetBranch);
+                return undefined;
+            }
+        }
+
+        try {
+            const base = (await this.git.raw(['merge-base', 'HEAD', targetRef])).trim();
+            this.cachedDiffBase = base;
+            this.cachedDiffBaseKey = key;
+            this.outputChannel.appendLine(`PR Gutter: diff base ${base.substring(0, 7)} (merge-base of HEAD and ${targetRef})`);
+            return base;
+        } catch (error) {
+            // Disjoint histories or unborn HEAD
+            this.outputChannel.appendLine(`PR Gutter: could not compute merge-base of HEAD and ${targetRef}: ${error}`);
+            return undefined;
+        }
+    }
+
+    /**
+     * Debounced decoration update - collapses bursts of triggers
+     * (Save All, format-on-save, rapid editor switches) into one refresh.
+     */
+    private scheduleUpdate(delayMs: number = 150) {
+        if (this.refreshTimer) {
+            clearTimeout(this.refreshTimer);
+        }
+        this.refreshTimer = setTimeout(() => {
+            this.refreshTimer = undefined;
+            this.updateDecorations();
+        }, delayMs);
     }
 
     async setTargetBranch() {
@@ -374,7 +467,9 @@ class GitDiffProvider {
                 // Test diff command with more specific logging
                 try {
                     console.log(`PR Gutter: Testing diff for ${relativePath}`);
-                    const diffResult = await this.git.diff([`${this.targetBranch}...HEAD`, '--', relativePath]);
+                    const base = await this.resolveDiffBase();
+                    debugInfo += `Diff base: ${base ?? 'unresolved'}\n`;
+                    const diffResult = base ? await this.git.diff([base, '--', relativePath]) : '';
                     debugInfo += `Diff result length: ${diffResult.length} chars\n`;
                     if (diffResult.trim()) {
                         debugInfo += `Diff preview:\n\`\`\`\n${diffResult.substring(0, 500)}\n\`\`\`\n`;
@@ -414,52 +509,15 @@ class GitDiffProvider {
         }
 
         try {
-            // Get current branch
-            const status = await this.git.status();
-            const currentBranch = status.current;
-
-            if (!currentBranch) {
-                // Detached HEAD (e.g. mid-rebase) - don't spam popups, just log once
-                if (!this.warnedDetachedHead) {
-                    this.outputChannel.appendLine('PR Gutter: Not on any branch (detached HEAD?); skipping diff.');
-                    this.warnedDetachedHead = true;
-                }
+            // Full refresh: re-resolve the comparison base, then update decorations
+            this.invalidateDiffBase();
+            const base = await this.resolveDiffBase();
+            if (!base) {
                 this.clearDecorations();
                 return;
             }
-            this.warnedDetachedHead = false;
 
-            // If using commit hash, validate it exists
-            if (this.targetCommit) {
-                try {
-                    await this.git.revparse([this.targetCommit]);
-                } catch {
-                    this.warnOnceAboutTarget(`PR Gutter: target commit '${this.targetCommit}' not found.`, this.targetCommit);
-                    this.clearDecorations();
-                    return;
-                }
-            } else {
-                // Check if target branch exists locally or remotely
-                const branches = await this.git.branch();
-                const targetExists = branches.all.includes(this.targetBranch) ||
-                                   branches.all.includes(`remotes/origin/${this.targetBranch}`);
-
-                if (!targetExists) {
-                    this.warnOnceAboutTarget(`PR Gutter: target branch '${this.targetBranch}' not found.`, this.targetBranch);
-                    this.clearDecorations();
-                    return;
-                }
-
-                // Don't compare if we're already on the target branch
-                if (currentBranch === this.targetBranch) {
-                    // Clear all decorations
-                    this.clearDecorations();
-                    return;
-                }
-            }
-
-            // Update decorations for currently visible editors
-            this.updateDecorations();
+            await this.updateDecorations();
 
         } catch (error) {
             console.error('Error refreshing diff:', error);
@@ -500,56 +558,20 @@ class GitDiffProvider {
         }
 
         const relativePath = path.relative(this.workspaceRoot, filePath);
-        console.log('PR Gutter: Relative path:', relativePath);        try {
-            // Try different diff strategies
-            let diffResult = '';
-            let diffCommand = '';
-
-            // Determine what to compare against: commit hash or branch
-            const target = this.targetCommit || this.targetBranch;
-            const isCommit = !!this.targetCommit;
-
-            if (isCommit) {
-                // If target is a commit hash, use it directly
-                try {
-                    diffCommand = `${target}...HEAD`;
-                    diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-                } catch {
-                    try {
-                        diffCommand = `${target}..HEAD`;
-                        diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-                    } catch {
-                        diffCommand = `${target} HEAD`;
-                        diffResult = await this.git.diff([target, 'HEAD', '--', relativePath]);
-                    }
-                }
-            } else {
-                // If target is a branch, try different strategies
-                try {
-                    // First try: compare with remote branch if it exists
-                    diffCommand = `origin/${target}...HEAD`;
-                    diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-                } catch {
-                    try {
-                        // Second try: compare with local branch
-                        diffCommand = `${target}...HEAD`;
-                        diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-                    } catch {
-                        try {
-                            // Third try: compare with branch directly
-                            diffCommand = `${target}..HEAD`;
-                            diffResult = await this.git.diff([diffCommand, '--', relativePath]);
-                        } catch {
-                            // Fourth try: simple diff
-                            diffCommand = `${target} HEAD`;
-                            diffResult = await this.git.diff([target, 'HEAD', '--', relativePath]);
-                        }
-                    }
-                }
+        console.log('PR Gutter: Relative path:', relativePath);
+        try {
+            // Diff the working tree against the cached merge-base - a single
+            // git invocation, and it includes uncommitted changes
+            const base = await this.resolveDiffBase();
+            if (!base) {
+                this.clearDecorations();
+                return;
             }
 
+            const diffResult = await this.git.diff([base, '--', relativePath]);
+
             // Debug output
-            console.log(`PR Gutter: Comparing ${diffCommand} for ${relativePath}`);
+            console.log(`PR Gutter: Comparing working tree against ${base.substring(0, 7)} for ${relativePath}`);
             console.log(`PR Gutter: Diff result length: ${diffResult.length}`);
             if (diffResult.trim()) {
                 console.log(`PR Gutter: Diff preview:`, diffResult.substring(0, 200));

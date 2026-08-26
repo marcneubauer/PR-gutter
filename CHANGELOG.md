@@ -11,8 +11,15 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 - "Pick Branch..." action on missing-target warnings
 - CI workflow (compile + package `.vsix` on every push/PR) and release workflow (tag `v*` publishes a GitHub Release with the `.vsix`; publishes to the VS Code Marketplace when `VSCE_PAT` is configured)
 
+### Performance
+
+- The comparison target is resolved once to a cached merge-base (invalidated on branch switch, commit, fetch, or config change) instead of trying up to four diff strategies on every editor switch
+- Decoration refreshes are debounced; bursts of saves or editor switches collapse into one update
+- Saving a file only re-diffs when it is the active document; `git status`/`git branch` are no longer run on every save
+
 ### Changed
 
+- Diffs now compare the working tree against the merge-base with the target, so uncommitted changes are highlighted too (previously only committed changes were shown); on the target branch itself, uncommitted changes are shown instead of nothing
 - Missing target branch/commit warnings now appear at most once per target instead of on every save, and no longer dump the full branch list
 - Detached HEAD no longer triggers warning popups on every save (logged once to the output channel instead)
 - `npm run reinstall` no longer hardcodes a personal absolute path
