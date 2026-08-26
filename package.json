@@ -55,8 +55,8 @@
       "properties": {
         "pr-gutter.targetBranch": {
           "type": "string",
-          "default": "main",
-          "description": "The target branch to compare against (ignored if targetCommit is set)"
+          "default": "",
+          "description": "The target branch to compare against. Leave empty to auto-detect the repository's default branch (origin/HEAD, falling back to main/master/develop/trunk). Ignored if targetCommit is set."
         },
         "pr-gutter.targetCommit": {
           "type": "string",

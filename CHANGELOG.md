@@ -2,6 +2,25 @@
 
 All notable changes to the "pr-gutter" extension will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Auto-detection of the repository default branch (origin/HEAD, falling back to main/master/develop/trunk) when `pr-gutter.targetBranch` is empty (now the default)
+- "Auto-detect" option in the Set Target Branch quick pick
+- "Pick Branch..." action on missing-target warnings
+- CI workflow (compile + package `.vsix` on every push/PR) and release workflow (tag `v*` publishes a GitHub Release with the `.vsix`; publishes to the VS Code Marketplace when `VSCE_PAT` is configured)
+
+### Changed
+
+- Missing target branch/commit warnings now appear at most once per target instead of on every save, and no longer dump the full branch list
+- Detached HEAD no longer triggers warning popups on every save (logged once to the output channel instead)
+- `npm run reinstall` no longer hardcodes a personal absolute path
+- README documents real installation steps (GitHub Release `.vsix` or build from source)
+
+### Removed
+
+- Committed build artifacts (`dist/`, `out/`, `*.vsix`) removed from the repository and gitignored
 
 ## [0.0.1] - 2025-11-09
 
@@ -25,4 +44,3 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 - **Branch Selection**: Quick pick menu to choose target branch from available branches
 - **Auto-detection**: Automatically works when opening files in git repositories
 - **Error Handling**: Graceful handling of missing branches and git errors
-- **Performance**: Only updates decorations for active editor to minimize resource usage

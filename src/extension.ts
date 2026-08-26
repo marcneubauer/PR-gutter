@@ -8,10 +8,10 @@ const outputChannel = vscode.window.createOutputChannel('PR Gutter');
 export function activate(context: vscode.ExtensionContext) {
     outputChannel.appendLine('PR Gutter: Extension activating...');
     console.log('PR Gutter: Extension activating...');
-    
+
     try {
         const gitDiffProvider = new GitDiffProvider(context, outputChannel);
-        
+
         // Register commands
         context.subscriptions.push(
             vscode.commands.registerCommand('pr-gutter.setTargetBranch', async () => {
@@ -36,22 +36,22 @@ export function activate(context: vscode.ExtensionContext) {
                 }
             })
         );
-        
+
         console.log('PR Gutter: Commands registered successfully');
-        
+
         // Initialize the provider
         gitDiffProvider.initialize().catch(error => {
             console.error('PR Gutter: Error initializing provider:', error);
             vscode.window.showErrorMessage(`PR Gutter initialization failed: ${error}`);
         });
-        
+
         outputChannel.appendLine('PR Gutter: Extension activated successfully');
         console.log('PR Gutter: Extension activated successfully');
         const showStartupNotification = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showStartupNotification', true);
         if (showStartupNotification) {
             vscode.window.showInformationMessage('PR Gutter extension activated');
         }
-        
+
     } catch (error) {
         console.error('PR Gutter: Error during activation:', error);
         vscode.window.showErrorMessage(`PR Gutter activation failed: ${error}`);
@@ -83,13 +83,16 @@ class GitDiffProvider {
     private git: SimpleGit | undefined;
     private workspaceRoot: string | undefined;
     private targetBranch: string = 'main';
+    private targetBranchSetting: string = '';
     private targetCommit: string = '';
     private showOutline: boolean = true;
-    
+    private warnedTargets = new Set<string>();
+    private warnedDetachedHead = false;
+
     constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
         this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
         console.log('PR Gutter: GitDiffProvider constructor called');
-        
+
         try {
             // Create decoration types for different change types
             const showGutterIcons = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showGutterIcons', true);
@@ -190,15 +193,15 @@ class GitDiffProvider {
             throw error;
         }
     }
-    
+
     async initialize() {
         // Get workspace root
         if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
             this.workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
             console.log(`PR Gutter: Detected workspace root: ${this.workspaceRoot}`);
-            
+
             this.git = simpleGit(this.workspaceRoot);
-            
+
             // Test if this is actually a git repository
             try {
                 const isRepo = await this.git.checkIsRepo();
@@ -211,59 +214,103 @@ class GitDiffProvider {
                 console.error('PR Gutter: Error checking git repository:', error);
                 return;
             }
-            
-            // Get target branch from configuration
-            this.updateTargetBranch();
-            
+
+            // Get target branch from configuration (auto-detecting if unset)
+            await this.updateTargetBranch();
+
             // Listen to configuration changes
-            vscode.workspace.onDidChangeConfiguration((event: vscode.ConfigurationChangeEvent) => {
+            vscode.workspace.onDidChangeConfiguration(async (event: vscode.ConfigurationChangeEvent) => {
                 if (event.affectsConfiguration('pr-gutter.targetBranch') || event.affectsConfiguration('pr-gutter.targetCommit') || event.affectsConfiguration('pr-gutter.showOutline')) {
-                    this.updateTargetBranch();
+                    await this.updateTargetBranch();
                     this.refreshDiff();
                 }
             });
-            
+
             // Listen to file changes
             const autoRefresh = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('autoRefresh', true);
             if (autoRefresh) {
                 vscode.workspace.onDidSaveTextDocument(() => {
                     this.refreshDiff();
                 });
-                
+
                 vscode.window.onDidChangeActiveTextEditor(() => {
                     this.updateDecorations();
                 });
             }
-            
+
             // Initial diff update
             await this.refreshDiff();
         } else {
             console.log('PR Gutter: No workspace folders found');
         }
     }
-    
-    private updateTargetBranch() {
-        this.targetBranch = vscode.workspace.getConfiguration('pr-gutter').get<string>('targetBranch', 'main');
-        this.targetCommit = vscode.workspace.getConfiguration('pr-gutter').get<string>('targetCommit', '');
-        this.showOutline = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showOutline', true);
+
+    private async updateTargetBranch() {
+        const config = vscode.workspace.getConfiguration('pr-gutter');
+        this.targetBranchSetting = config.get<string>('targetBranch', '');
+        this.targetCommit = config.get<string>('targetCommit', '');
+        this.showOutline = config.get<boolean>('showOutline', true);
+
+        if (this.targetBranchSetting) {
+            this.targetBranch = this.targetBranchSetting;
+        } else {
+            this.targetBranch = await this.detectDefaultBranch();
+            this.outputChannel.appendLine(`PR Gutter: Auto-detected default branch: ${this.targetBranch}`);
+        }
     }
-    
+
+    /**
+     * Detect the repository's default branch: prefer origin/HEAD, then fall back
+     * to common default branch names that exist locally or on origin.
+     */
+    private async detectDefaultBranch(): Promise<string> {
+        if (!this.git) {
+            return 'main';
+        }
+
+        try {
+            const ref = (await this.git.raw(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])).trim();
+            if (ref) {
+                return ref.replace(/^origin\//, '');
+            }
+        } catch {
+            // No origin/HEAD ref (e.g. no remote, or never fetched) - fall through
+        }
+
+        try {
+            const branches = await this.git.branch();
+            for (const candidate of ['main', 'master', 'develop', 'trunk']) {
+                if (branches.all.includes(candidate) || branches.all.includes(`remotes/origin/${candidate}`)) {
+                    return candidate;
+                }
+            }
+        } catch {
+            // ignore and fall through to default
+        }
+
+        return 'main';
+    }
+
     async setTargetBranch() {
         if (!this.git) {
             vscode.window.showErrorMessage('No git repository found');
             return;
         }
-        
+
         try {
             // Get all branches
             const branches = await this.git.branch();
             const branchNames = branches.all.filter((branch: string) => !branch.startsWith('remotes/'));
-            
-            const selectedBranch = await vscode.window.showQuickPick(branchNames, {
+
+            const autoDetectLabel = 'Auto-detect (use repository default branch)';
+            const selectedBranch = await vscode.window.showQuickPick([autoDetectLabel, ...branchNames], {
                 placeHolder: 'Select target branch to compare against'
             });
-            
-            if (selectedBranch) {
+
+            if (selectedBranch === autoDetectLabel) {
+                await vscode.workspace.getConfiguration('pr-gutter').update('targetBranch', '', vscode.ConfigurationTarget.Workspace);
+                vscode.window.showInformationMessage('Target branch set to auto-detect');
+            } else if (selectedBranch) {
                 await vscode.workspace.getConfiguration('pr-gutter').update('targetBranch', selectedBranch, vscode.ConfigurationTarget.Workspace);
                 vscode.window.showInformationMessage(`Target branch set to: ${selectedBranch}`);
             }
@@ -271,43 +318,59 @@ class GitDiffProvider {
             vscode.window.showErrorMessage(`Error getting branches: ${error}`);
         }
     }
-    
+
+    /**
+     * Warn about a bad comparison target at most once per target value,
+     * offering a quick way to pick a valid branch.
+     */
+    private warnOnceAboutTarget(message: string, target: string) {
+        if (this.warnedTargets.has(target)) {
+            return;
+        }
+        this.warnedTargets.add(target);
+        vscode.window.showWarningMessage(message, 'Pick Branch...').then(choice => {
+            if (choice === 'Pick Branch...') {
+                this.setTargetBranch();
+            }
+        });
+    }
+
     async showDebugInfo() {
         if (!this.git || !this.workspaceRoot) {
             vscode.window.showErrorMessage('No git repository found');
             return;
         }
-        
+
         try {
             // Add debugging for workspace detection
             console.log('PR Gutter: Workspace root:', this.workspaceRoot);
             console.log('PR Gutter: Working directory check...');
-            
+
             // Test if the workspace is actually a git repo
             const isRepo = await this.git.checkIsRepo();
             console.log('PR Gutter: Is git repo:', isRepo);
-            
+
             if (!isRepo) {
                 vscode.window.showErrorMessage(`Directory ${this.workspaceRoot} is not a git repository`);
                 return;
             }
-            
+
             const status = await this.git.status();
             const branches = await this.git.branch();
             const activeEditor = vscode.window.activeTextEditor;
-            
+
             let debugInfo = `**PR Gutter Debug Info**\n\n`;
             debugInfo += `Workspace root: ${this.workspaceRoot}\n`;
             debugInfo += `Is git repo: ${isRepo}\n`;
             debugInfo += `Current branch: ${status.current}\n`;
-            debugInfo += `Target branch: ${this.targetBranch}\n`;
+            debugInfo += `Target branch: ${this.targetBranch}${this.targetBranchSetting ? '' : ' (auto-detected)'}\n`;
             debugInfo += `Available branches: ${branches.all.join(', ')}\n`;
-            
+
             if (activeEditor) {
                 const filePath = activeEditor.document.fileName;
                 const relativePath = path.relative(this.workspaceRoot, filePath);
                 debugInfo += `Active file: ${relativePath}\n`;
-                
+
                 // Test diff command with more specific logging
                 try {
                     console.log(`PR Gutter: Testing diff for ${relativePath}`);
@@ -315,7 +378,7 @@ class GitDiffProvider {
                     debugInfo += `Diff result length: ${diffResult.length} chars\n`;
                     if (diffResult.trim()) {
                         debugInfo += `Diff preview:\n\`\`\`\n${diffResult.substring(0, 500)}\n\`\`\`\n`;
-                        
+
                         // Parse and show changes
                         const changes = this.parseDiff(diffResult);
                         debugInfo += `Parsed changes: ${changes.length}\n`;
@@ -332,53 +395,61 @@ class GitDiffProvider {
             } else {
                 debugInfo += `No active editor\n`;
             }
-            
+
             // Show in output channel
             const outputChannel = vscode.window.createOutputChannel('PR Gutter Debug');
             outputChannel.clear();
             outputChannel.append(debugInfo);
             outputChannel.show();
-            
+
         } catch (error) {
             console.error('PR Gutter: Debug info error:', error);
             vscode.window.showErrorMessage(`Debug info error: ${error}`);
         }
     }
-    
+
     async refreshDiff() {
         if (!this.git || !this.workspaceRoot) {
             return;
         }
-        
+
         try {
             // Get current branch
             const status = await this.git.status();
             const currentBranch = status.current;
-            
+
             if (!currentBranch) {
-                vscode.window.showWarningMessage('Not on any git branch');
+                // Detached HEAD (e.g. mid-rebase) - don't spam popups, just log once
+                if (!this.warnedDetachedHead) {
+                    this.outputChannel.appendLine('PR Gutter: Not on any branch (detached HEAD?); skipping diff.');
+                    this.warnedDetachedHead = true;
+                }
+                this.clearDecorations();
                 return;
             }
-            
+            this.warnedDetachedHead = false;
+
             // If using commit hash, validate it exists
             if (this.targetCommit) {
                 try {
                     await this.git.revparse([this.targetCommit]);
                 } catch {
-                    vscode.window.showWarningMessage(`Target commit '${this.targetCommit}' not found`);
+                    this.warnOnceAboutTarget(`PR Gutter: target commit '${this.targetCommit}' not found.`, this.targetCommit);
+                    this.clearDecorations();
                     return;
                 }
             } else {
                 // Check if target branch exists locally or remotely
                 const branches = await this.git.branch();
-                const targetExists = branches.all.includes(this.targetBranch) || 
+                const targetExists = branches.all.includes(this.targetBranch) ||
                                    branches.all.includes(`remotes/origin/${this.targetBranch}`);
-                
+
                 if (!targetExists) {
-                    vscode.window.showWarningMessage(`Target branch '${this.targetBranch}' not found. Available branches: ${branches.all.join(', ')}`);
+                    this.warnOnceAboutTarget(`PR Gutter: target branch '${this.targetBranch}' not found.`, this.targetBranch);
+                    this.clearDecorations();
                     return;
                 }
-                
+
                 // Don't compare if we're already on the target branch
                 if (currentBranch === this.targetBranch) {
                     // Clear all decorations
@@ -386,16 +457,16 @@ class GitDiffProvider {
                     return;
                 }
             }
-            
+
             // Update decorations for currently visible editors
             this.updateDecorations();
-            
+
         } catch (error) {
             console.error('Error refreshing diff:', error);
             vscode.window.showErrorMessage(`Error refreshing diff: ${error}`);
         }
     }
-    
+
     private clearDecorations() {
         const activeEditor = vscode.window.activeTextEditor;
         if (activeEditor) {
@@ -410,7 +481,7 @@ class GitDiffProvider {
             activeEditor.setDecorations(this.deletedDecorationType, []);
         }
     }
-    
+
     private async updateDecorations() {
         console.log('PR Gutter: updateDecorations called');
         const activeEditor = vscode.window.activeTextEditor;
@@ -421,7 +492,7 @@ class GitDiffProvider {
 
         const filePath = activeEditor.document.fileName;
         console.log('PR Gutter: Current file path:', filePath);
-        
+
         // Skip non-file schemes (like git:, output:, etc.)
         if (!filePath.startsWith(this.workspaceRoot)) {
             console.log('PR Gutter: File not in workspace, skipping');
@@ -433,11 +504,11 @@ class GitDiffProvider {
             // Try different diff strategies
             let diffResult = '';
             let diffCommand = '';
-            
+
             // Determine what to compare against: commit hash or branch
             const target = this.targetCommit || this.targetBranch;
             const isCommit = !!this.targetCommit;
-            
+
             if (isCommit) {
                 // If target is a commit hash, use it directly
                 try {
@@ -476,7 +547,7 @@ class GitDiffProvider {
                     }
                 }
             }
-            
+
             // Debug output
             console.log(`PR Gutter: Comparing ${diffCommand} for ${relativePath}`);
             console.log(`PR Gutter: Diff result length: ${diffResult.length}`);
@@ -488,7 +559,7 @@ class GitDiffProvider {
             this.outputChannel.appendLine(`PR Gutter1: Found ${changes.length} changes`);
             this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
             console.log(`PR Gutter2: Found ${changes.length} changes`);
-            
+
             this.outputChannel.appendLine('PR Gutter1: About to call applyDecorations');
             console.log('PR Gutter2: About to call applyDecorations');
             // Apply decorations
@@ -502,17 +573,17 @@ class GitDiffProvider {
             this.clearDecorations();
         }
     }
-    
+
     private parseDiff(diffText: string): DiffChange[] {
         const changes: DiffChange[] = [];
         if (!diffText.trim()) {
             return changes;
         }
-        
+
         const lines = diffText.split('\n');
         let currentNewLine = 0;
         let inHunk = false;
-        
+
         for (const line of lines) {
             if (line.startsWith('@@')) {
                 // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
@@ -523,11 +594,11 @@ class GitDiffProvider {
                 }
                 continue;
             }
-            
+
             if (!inHunk) {
                 continue;
             }
-            
+
             if (line.startsWith('+') && !line.startsWith('+++')) {
                 // Added line
                 changes.push({
@@ -552,22 +623,22 @@ class GitDiffProvider {
                 continue;
             }
         }
-        
+
         // Merge consecutive changes of the same type for better visualization
         return this.mergeConsecutiveChanges(changes);
     }
-    
+
     private mergeConsecutiveChanges(changes: DiffChange[]): DiffChange[] {
         if (changes.length === 0) {
             return changes;
         }
-        
+
         const merged: DiffChange[] = [];
         let current = changes[0];
-        
+
         for (let i = 1; i < changes.length; i++) {
             const next = changes[i];
-            
+
             // Merge if same type and consecutive lines
             if (current.type === next.type && current.endLine + 1 === next.startLine) {
                 current.endLine = next.endLine;
@@ -576,17 +647,17 @@ class GitDiffProvider {
                 current = next;
             }
         }
-        
+
         merged.push(current);
         return merged;
     }
-    
+
     private applyDecorations(editor: vscode.TextEditor, changes: DiffChange[]) {
         this.outputChannel.appendLine(`PR Gutter1: applyDecorations called with ${changes.length} changes`);
         this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
         console.log('PR Gutter: applyDecorations called with', changes.length, 'changes');
         console.log('PR Gutter: Changes details:', JSON.stringify(changes));
-        
+
         const addedSingleLineDecorations: vscode.DecorationOptions[] = [];
         const addedFirstLineDecorations: vscode.DecorationOptions[] = [];
         const addedMiddleLineDecorations: vscode.DecorationOptions[] = [];
@@ -596,25 +667,25 @@ class GitDiffProvider {
         const modifiedMiddleLineDecorations: vscode.DecorationOptions[] = [];
         const modifiedLastLineDecorations: vscode.DecorationOptions[] = [];
         const deletedDecorations: vscode.DecorationOptions[] = [];
-        
+
         for (const change of changes) {
             // Ensure line numbers are within document bounds
             const startLine = Math.max(0, Math.min(change.startLine, editor.document.lineCount - 1));
             const endLine = Math.max(0, Math.min(change.endLine, editor.document.lineCount - 1));
-            
+
             if (startLine >= editor.document.lineCount) {
                 continue;
             }
-            
+
             if (change.type === 'added') {
                 if (this.showOutline) {
                     // Handle added lines with proper border decoration based on position
                     const lineCount = endLine - startLine + 1;
-                    
+
                     if (lineCount === 1) {
                         // Single line addition - use all borders
                         const range = new vscode.Range(startLine, 0, startLine, 0);
-                        addedSingleLineDecorations.push({ 
+                        addedSingleLineDecorations.push({
                             range,
                             hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                         });
@@ -626,7 +697,7 @@ class GitDiffProvider {
                                 range,
                                 hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                             };
-                            
+
                             if (line === startLine) {
                                 // First line: top, left, right borders
                                 addedFirstLineDecorations.push(decoration);
@@ -642,7 +713,7 @@ class GitDiffProvider {
                 } else {
                     // No outline - just show gutter icon on first line
                     const range = new vscode.Range(startLine, 0, startLine, 0);
-                    addedSingleLineDecorations.push({ 
+                    addedSingleLineDecorations.push({
                         range,
                         hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                     });
@@ -651,11 +722,11 @@ class GitDiffProvider {
                 if (this.showOutline) {
                     // Handle modified lines with proper border decoration based on position
                     const lineCount = endLine - startLine + 1;
-                    
+
                     if (lineCount === 1) {
                         // Single line modified - use all borders
                         const range = new vscode.Range(startLine, 0, startLine, 0);
-                        modifiedSingleLineDecorations.push({ 
+                        modifiedSingleLineDecorations.push({
                             range,
                             hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                         });
@@ -667,7 +738,7 @@ class GitDiffProvider {
                                 range,
                                 hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                             };
-                            
+
                             if (line === startLine) {
                                 // First line: top, left, right borders
                                 modifiedFirstLineDecorations.push(decoration);
@@ -683,7 +754,7 @@ class GitDiffProvider {
                 } else {
                     // No outline - just show gutter icon on first line
                     const range = new vscode.Range(startLine, 0, startLine, 0);
-                    modifiedSingleLineDecorations.push({ 
+                    modifiedSingleLineDecorations.push({
                         range,
                         hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                     });
@@ -691,16 +762,16 @@ class GitDiffProvider {
             } else if (change.type === 'deleted') {
                 // Handle deleted lines
                 const range = new vscode.Range(startLine, 0, endLine, 0);
-                deletedDecorations.push({ 
+                deletedDecorations.push({
                     range,
                     hoverMessage: this.getHoverMessage(change.type, startLine, endLine)
                 });
             }
         }
-        
+
         this.outputChannel.appendLine(`PR Gutter1: Applying decorations - added single: ${addedSingleLineDecorations.length}, first: ${addedFirstLineDecorations.length}, middle: ${addedMiddleLineDecorations.length}, last: ${addedLastLineDecorations.length}, modified single: ${modifiedSingleLineDecorations.length}, first: ${modifiedFirstLineDecorations.length}, middle: ${modifiedMiddleLineDecorations.length}, last: ${modifiedLastLineDecorations.length}, deleted: ${deletedDecorations.length}`);
         console.log('PR Gutter: Applying decorations - added single:', addedSingleLineDecorations.length, 'first:', addedFirstLineDecorations.length, 'middle:', addedMiddleLineDecorations.length, 'last:', addedLastLineDecorations.length, 'modified single:', modifiedSingleLineDecorations.length, 'first:', modifiedFirstLineDecorations.length, 'middle:', modifiedMiddleLineDecorations.length, 'last:', modifiedLastLineDecorations.length, 'deleted:', deletedDecorations.length);
-        
+
         editor.setDecorations(this.addedSingleLineDecorationType, addedSingleLineDecorations);
         editor.setDecorations(this.addedFirstLineDecorationType, addedFirstLineDecorations);
         editor.setDecorations(this.addedMiddleLineDecorationType, addedMiddleLineDecorations);
@@ -710,14 +781,14 @@ class GitDiffProvider {
         editor.setDecorations(this.modifiedMiddleLineDecorationType, modifiedMiddleLineDecorations);
         editor.setDecorations(this.modifiedLastLineDecorationType, modifiedLastLineDecorations);
         editor.setDecorations(this.deletedDecorationType, deletedDecorations);
-        
+
         console.log('PR Gutter: Decorations applied successfully');
     }
-    
+
     private getHoverMessage(type: 'added' | 'modified' | 'deleted', startLine: number, endLine: number): string {
         const lineText = startLine === endLine ? `line ${startLine + 1}` : `lines ${startLine + 1}-${endLine + 1}`;
         const target = this.targetCommit ? `commit ${this.targetCommit.substring(0, 7)}` : this.targetBranch;
-        
+
         switch (type) {
             case 'added':
                 return `Added ${lineText} (not in ${target})`;
