@@ -4,15 +4,29 @@
   "description": "Shows git diff highlighting in the gutter between current branch and a configurable target branch",
   "version": "0.0.1",
   "publisher": "marcneubauer",
+  "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/marcneubauer/pr-gutter.git"
+    "url": "https://github.com/marcneubauer/PR-gutter.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marcneubauer/PR-gutter/issues"
   },
   "engines": {
     "vscode": "^1.74.0"
   },
   "categories": [
+    "SCM Providers",
     "Other"
+  ],
+  "keywords": [
+    "git",
+    "diff",
+    "gutter",
+    "pull request",
+    "code review",
+    "branch",
+    "compare"
   ],
   "activationEvents": [
     "onStartupFinished"
@@ -79,7 +93,8 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
-    "reinstall": "npm run package && npx vsce package --allow-missing-repository && code --uninstall-extension marcneubauer.pr-gutter ; code --install-extension /Users/marc/Documents/code/PR-gutter/pr-gutter-0.0.1.vsix"
+    "package:vsix": "vsce package",
+    "reinstall": "npm run package:vsix && (code --uninstall-extension marcneubauer.pr-gutter || true) && code --install-extension \"$(ls -t *.vsix | head -n 1)\""
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
