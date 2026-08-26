@@ -4,7 +4,14 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ## [Unreleased]
 
+### Fixed
+
+- Changed lines are now correctly reported as **modified** (orange) - previously every change appeared as a delete + add pair, and the modified decorations were dead code
+- Runs of consecutive deleted lines now produce a single deletion marker instead of stacking duplicates on one line
+
 ### Added
+
+- Unit tests for the diff parser (vitest), run in CI
 
 - Auto-detection of the repository default branch (origin/HEAD, falling back to main/master/develop/trunk) when `pr-gutter.targetBranch` is empty (now the default)
 - "Auto-detect" option in the Set Target Branch quick pick

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { simpleGit, SimpleGit } from 'simple-git';
 import * as path from 'path';
+import { DiffChange, parseDiff } from './diffParser';
 
 // Create output channel for logging
 const outputChannel = vscode.window.createOutputChannel('PR Gutter');
@@ -60,12 +61,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
     outputChannel.appendLine('PR Gutter: Extension deactivating...');
-}
-
-interface DiffChange {
-    startLine: number;
-    endLine: number;
-    type: 'added' | 'modified' | 'deleted';
 }
 
 class GitDiffProvider {
@@ -475,7 +470,7 @@ class GitDiffProvider {
                         debugInfo += `Diff preview:\n\`\`\`\n${diffResult.substring(0, 500)}\n\`\`\`\n`;
 
                         // Parse and show changes
-                        const changes = this.parseDiff(diffResult);
+                        const changes = parseDiff(diffResult);
                         debugInfo += `Parsed changes: ${changes.length}\n`;
                         changes.forEach((change, i) => {
                             debugInfo += `  Change ${i + 1}: ${change.type} lines ${change.startLine + 1}-${change.endLine + 1}\n`;
@@ -577,7 +572,7 @@ class GitDiffProvider {
                 console.log(`PR Gutter: Diff preview:`, diffResult.substring(0, 200));
             }
 
-            const changes = this.parseDiff(diffResult);
+            const changes = parseDiff(diffResult);
             this.outputChannel.appendLine(`PR Gutter1: Found ${changes.length} changes`);
             this.outputChannel.appendLine(`PR Gutter1: Changes: ${JSON.stringify(changes)}`);
             console.log(`PR Gutter2: Found ${changes.length} changes`);
@@ -594,84 +589,6 @@ class GitDiffProvider {
             // Clear decorations on error
             this.clearDecorations();
         }
-    }
-
-    private parseDiff(diffText: string): DiffChange[] {
-        const changes: DiffChange[] = [];
-        if (!diffText.trim()) {
-            return changes;
-        }
-
-        const lines = diffText.split('\n');
-        let currentNewLine = 0;
-        let inHunk = false;
-
-        for (const line of lines) {
-            if (line.startsWith('@@')) {
-                // Parse hunk header: @@ -old_start,old_count +new_start,new_count @@
-                const match = line.match(/@@ -\d+,?\d* \+(\d+),?\d* @@/);
-                if (match) {
-                    currentNewLine = parseInt(match[1]) - 1; // VS Code uses 0-based line numbers
-                    inHunk = true;
-                }
-                continue;
-            }
-
-            if (!inHunk) {
-                continue;
-            }
-
-            if (line.startsWith('+') && !line.startsWith('+++')) {
-                // Added line
-                changes.push({
-                    startLine: currentNewLine,
-                    endLine: currentNewLine,
-                    type: 'added'
-                });
-                currentNewLine++;
-            } else if (line.startsWith('-') && !line.startsWith('---')) {
-                // Deleted line (shown at current position)
-                changes.push({
-                    startLine: currentNewLine,
-                    endLine: currentNewLine,
-                    type: 'deleted'
-                });
-                // Don't increment currentNewLine for deleted lines in the new file
-            } else if (line.startsWith(' ')) {
-                // Context line - exists in both versions
-                currentNewLine++;
-            } else if (line.startsWith('\\')) {
-                // "No newline at end of file" - ignore
-                continue;
-            }
-        }
-
-        // Merge consecutive changes of the same type for better visualization
-        return this.mergeConsecutiveChanges(changes);
-    }
-
-    private mergeConsecutiveChanges(changes: DiffChange[]): DiffChange[] {
-        if (changes.length === 0) {
-            return changes;
-        }
-
-        const merged: DiffChange[] = [];
-        let current = changes[0];
-
-        for (let i = 1; i < changes.length; i++) {
-            const next = changes[i];
-
-            // Merge if same type and consecutive lines
-            if (current.type === next.type && current.endLine + 1 === next.startLine) {
-                current.endLine = next.endLine;
-            } else {
-                merged.push(current);
-                current = next;
-            }
-        }
-
-        merged.push(current);
-        return merged;
     }
 
     private applyDecorations(editor: vscode.TextEditor, changes: DiffChange[]) {

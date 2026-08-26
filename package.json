@@ -93,6 +93,8 @@
     "package": "webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "package:vsix": "vsce package",
     "reinstall": "npm run package:vsix && (code --uninstall-extension marcneubauer.pr-gutter || true) && code --install-extension \"$(ls -t *.vsix | head -n 1)\""
   },
@@ -102,6 +104,7 @@
     "@vscode/vsce": "^3.7.0",
     "ts-loader": "^9.5.4",
     "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
     "webpack": "^5.102.1",
     "webpack-cli": "^6.0.1"
   },
