@@ -29,7 +29,7 @@
     "compare"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "workspaceContains:.git"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -87,6 +87,11 @@
           "type": "boolean",
           "default": false,
           "description": "Show a notification when the extension activates (the status bar item indicates activation instead)"
+        },
+        "pr-gutter.trace": {
+          "type": "boolean",
+          "default": false,
+          "description": "Log verbose diagnostics to the PR Gutter output channel"
         }
       }
     }

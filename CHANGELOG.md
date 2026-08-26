@@ -11,6 +11,9 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ### Added
 
+- Multi-root workspace support: each workspace folder resolves its own repository, default branch, and diff base
+- All visible editors (splits) are decorated, not just the active one
+- `pr-gutter.trace` setting for verbose diagnostics (default off - routine logging no longer spams the output channel and console)
 - Status bar item showing the comparison target and the active file's change counts (`+added ~modified -deleted`); click it to pick a different target branch
 - Live decoration updates while typing: unsaved buffer contents are diffed against the target (debounced; disable with `pr-gutter.liveUpdate`)
 - Unit tests for the diff parser (vitest), run in CI
@@ -33,6 +36,9 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 - Missing target branch/commit warnings now appear at most once per target instead of on every save, and no longer dump the full branch list
 - Detached HEAD no longer triggers warning popups on every save (logged once to the output channel instead)
 - `pr-gutter.showStartupNotification` now defaults to `false` - the status bar item indicates activation instead
+- Extension activates via `workspaceContains:.git` instead of on every startup
+- All listeners, watchers, decoration types, and channels are now properly registered as disposables (no more leaks); the debug command reuses one output channel instead of creating a new one per invocation
+- Non-file documents are skipped by URI scheme instead of path prefix
 - `npm run reinstall` no longer hardcodes a personal absolute path
 - README documents real installation steps (GitHub Release `.vsix` or build from source)
 
