@@ -7,6 +7,7 @@ A VS Code extension that shows git diff highlighting in the gutter between the c
 - **Gutter Diff Highlighting**: Shows visual indicators in the editor gutter for lines that have been added, modified, or deleted compared to the target branch
 - **Configurable Target Branch**: Set any branch (or a specific commit) as the comparison target
 - **Auto-refresh**: Automatically updates diff highlights when files are saved (configurable)
+- **Status Bar**: Shows the comparison target and the active file's change counts; click it to switch branches
 - **Visual Indicators** (outline colors follow your color theme; changes are also marked in the overview ruler):
 
   - 😂 gutter emoji + added-color outline for added lines
@@ -60,7 +61,7 @@ You can configure the extension through VS Code settings:
   "pr-gutter.liveUpdate": true,            // Update while typing (unsaved changes)
   "pr-gutter.showOutline": true,           // Border outline around changed lines
   "pr-gutter.showGutterIcons": true,       // Emoji icons in the gutter
-  "pr-gutter.showStartupNotification": true // Notification on activation
+  "pr-gutter.showStartupNotification": false // Notification on activation
 }
 ```
 

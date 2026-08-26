@@ -54,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
 
         outputChannel.appendLine('PR Gutter: Extension activated successfully');
         console.log('PR Gutter: Extension activated successfully');
-        const showStartupNotification = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showStartupNotification', true);
+        const showStartupNotification = vscode.workspace.getConfiguration('pr-gutter').get<boolean>('showStartupNotification', false);
         if (showStartupNotification) {
             vscode.window.showInformationMessage('PR Gutter extension activated');
         }
@@ -92,10 +92,18 @@ class GitDiffProvider {
     private cachedDiffBaseKey: string | undefined;
     private refreshTimer: NodeJS.Timeout | undefined;
     private baselineCache = new Map<string, string>();
+    private statusBarItem: vscode.StatusBarItem;
 
     constructor(private context: vscode.ExtensionContext, private outputChannel: vscode.OutputChannel) {
         this.outputChannel.appendLine('PR Gutter: GitDiffProvider constructor called');
         console.log('PR Gutter: GitDiffProvider constructor called');
+
+        // Status bar: shows the comparison target and the active file's change
+        // counts; click to pick a different target branch
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+        this.statusBarItem.command = 'pr-gutter.setTargetBranch';
+        this.statusBarItem.text = '$(git-compare) PR Gutter';
+        this.statusBarItem.tooltip = 'PR Gutter: click to change the comparison target';
 
         try {
             // Create decoration types for different change types
@@ -248,6 +256,7 @@ class GitDiffProvider {
 
             // Get target branch from configuration (auto-detecting if unset)
             await this.updateTargetBranch();
+            this.statusBarItem.show();
 
             // Listen to configuration changes
             vscode.workspace.onDidChangeConfiguration(async (event: vscode.ConfigurationChangeEvent) => {
@@ -314,6 +323,25 @@ class GitDiffProvider {
             this.targetBranch = await this.detectDefaultBranch();
             this.outputChannel.appendLine(`PR Gutter: Auto-detected default branch: ${this.targetBranch}`);
         }
+
+        this.updateStatusBar();
+    }
+
+    /**
+     * Reflect the comparison target (and the active file's change counts,
+     * when known) in the status bar.
+     */
+    private updateStatusBar(counts?: { added: number; modified: number; deleted: number }) {
+        const target = this.targetCommit ? this.targetCommit.substring(0, 7) : this.targetBranch;
+        let text = `$(git-compare) ${target}`;
+        if (counts && (counts.added > 0 || counts.modified > 0 || counts.deleted > 0)) {
+            text += ` +${counts.added} ~${counts.modified} -${counts.deleted}`;
+        }
+        this.statusBarItem.text = text;
+
+        const kind = this.targetCommit ? 'commit' : 'branch';
+        const detected = this.targetCommit || this.targetBranchSetting ? '' : ' (auto-detected)';
+        this.statusBarItem.tooltip = `PR Gutter: comparing against ${kind} ${target}${detected} - click to change`;
     }
 
     /**
@@ -836,6 +864,22 @@ class GitDiffProvider {
         editor.setDecorations(this.modifiedMiddleLineDecorationType, modifiedMiddleLineDecorations);
         editor.setDecorations(this.modifiedLastLineDecorationType, modifiedLastLineDecorations);
         editor.setDecorations(this.deletedDecorationType, deletedDecorations);
+
+        // Reflect the active file's change counts in the status bar
+        let addedLines = 0;
+        let modifiedLines = 0;
+        let deletedGroups = 0;
+        for (const change of changes) {
+            const lineCount = change.endLine - change.startLine + 1;
+            if (change.type === 'added') {
+                addedLines += lineCount;
+            } else if (change.type === 'modified') {
+                modifiedLines += lineCount;
+            } else {
+                deletedGroups += 1;
+            }
+        }
+        this.updateStatusBar({ added: addedLines, modified: modifiedLines, deleted: deletedGroups });
 
         console.log('PR Gutter: Decorations applied successfully');
     }

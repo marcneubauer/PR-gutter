@@ -11,6 +11,7 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ### Added
 
+- Status bar item showing the comparison target and the active file's change counts (`+added ~modified -deleted`); click it to pick a different target branch
 - Live decoration updates while typing: unsaved buffer contents are diffed against the target (debounced; disable with `pr-gutter.liveUpdate`)
 - Unit tests for the diff parser (vitest), run in CI
 
@@ -31,6 +32,7 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 - Diffs now compare the working tree against the merge-base with the target, so uncommitted changes are highlighted too (previously only committed changes were shown); on the target branch itself, uncommitted changes are shown instead of nothing
 - Missing target branch/commit warnings now appear at most once per target instead of on every save, and no longer dump the full branch list
 - Detached HEAD no longer triggers warning popups on every save (logged once to the output channel instead)
+- `pr-gutter.showStartupNotification` now defaults to `false` - the status bar item indicates activation instead
 - `npm run reinstall` no longer hardcodes a personal absolute path
 - README documents real installation steps (GitHub Release `.vsix` or build from source)
 

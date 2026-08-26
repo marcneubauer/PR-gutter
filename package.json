@@ -85,8 +85,8 @@
         },
         "pr-gutter.showStartupNotification": {
           "type": "boolean",
-          "default": true,
-          "description": "Show a notification when the extension activates"
+          "default": false,
+          "description": "Show a notification when the extension activates (the status bar item indicates activation instead)"
         }
       }
     }
