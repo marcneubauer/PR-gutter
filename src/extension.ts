@@ -113,12 +113,30 @@ class GitDiffProvider {
                 gutterIconSize: 'contain'
             } : {};
 
+            // Theme-aware colors: follow the active color theme instead of
+            // hardcoded RGB values, and mark changes in the overview ruler
+            const addedColor = new vscode.ThemeColor('editorGutter.addedBackground');
+            const modifiedColor = new vscode.ThemeColor('editorGutter.modifiedBackground');
+            const addedRuler = {
+                overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.addedForeground'),
+                overviewRulerLane: vscode.OverviewRulerLane.Left
+            };
+            const modifiedRuler = {
+                overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.modifiedForeground'),
+                overviewRulerLane: vscode.OverviewRulerLane.Left
+            };
+            const deletedRuler = {
+                overviewRulerColor: new vscode.ThemeColor('editorOverviewRuler.deletedForeground'),
+                overviewRulerLane: vscode.OverviewRulerLane.Left
+            };
+
             // Single line modified (all borders)
             this.modifiedSingleLineDecorationType = vscode.window.createTextEditorDecorationType({
                 isWholeLine: true,
                 borderWidth: '1px 1px 1px 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(255, 165, 0, 0.8)',
+                borderColor: modifiedColor,
+                ...modifiedRuler,
                 ...modifiedGutterIcon
             });
 
@@ -127,7 +145,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '1px 1px 0 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(255, 165, 0, 0.8)',
+                borderColor: modifiedColor,
+                ...modifiedRuler,
                 ...modifiedGutterIcon
             });
 
@@ -136,7 +155,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '0 1px 0 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(255, 165, 0, 0.8)'
+                borderColor: modifiedColor,
+                ...modifiedRuler
             });
 
             // Last line of multi-line modified (bottom, left, right)
@@ -144,7 +164,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '0 1px 1px 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(255, 165, 0, 0.8)'
+                borderColor: modifiedColor,
+                ...modifiedRuler
             });
 
             // Legacy decoration type (kept for compatibility)
@@ -155,7 +176,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '1px 1px 1px 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(0, 255, 0, 0.8)',
+                borderColor: addedColor,
+                ...addedRuler,
                 ...addedGutterIcon
             });
 
@@ -164,7 +186,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '1px 1px 0 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(0, 255, 0, 0.8)',
+                borderColor: addedColor,
+                ...addedRuler,
                 ...addedGutterIcon
             });
 
@@ -173,7 +196,8 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '0 1px 0 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(0, 255, 0, 0.8)'
+                borderColor: addedColor,
+                ...addedRuler
             });
 
             // Last line of multi-line addition (bottom, left, right)
@@ -181,13 +205,15 @@ class GitDiffProvider {
                 isWholeLine: true,
                 borderWidth: '0 1px 1px 2px',
                 borderStyle: 'solid',
-                borderColor: 'rgba(0, 255, 0, 0.8)'
+                borderColor: addedColor,
+                ...addedRuler
             });
 
             // Legacy decoration type (kept for compatibility)
             this.addedDecorationType = this.addedSingleLineDecorationType;
 
             this.deletedDecorationType = vscode.window.createTextEditorDecorationType({
+                ...deletedRuler,
                 ...deletedGutterIcon
             });
 

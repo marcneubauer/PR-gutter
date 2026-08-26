@@ -27,6 +27,7 @@ All notable changes to the "pr-gutter" extension will be documented in this file
 
 ### Changed
 
+- Outline colors now follow the active color theme (`editorGutter.addedBackground` / `editorGutter.modifiedBackground`) instead of hardcoded RGB values, and all changes are marked in the overview ruler
 - Diffs now compare the working tree against the merge-base with the target, so uncommitted changes are highlighted too (previously only committed changes were shown); on the target branch itself, uncommitted changes are shown instead of nothing
 - Missing target branch/commit warnings now appear at most once per target instead of on every save, and no longer dump the full branch list
 - Detached HEAD no longer triggers warning popups on every save (logged once to the output channel instead)
